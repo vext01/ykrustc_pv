@@ -16,27 +16,36 @@ pub struct AddYkSWTCalls(pub DefIndex);
 impl MirPass for AddYkSWTCalls {
     fn run_pass<'a, 'tcx>(&self,
                           tcx: TyCtxt<'a, 'tcx, 'tcx>,
-                          _src: MirSource,
+                          src: MirSource,
                           mir: &mut Mir<'tcx>) {
-        // Find the libstd crate number.
-        let mut std_crate_num = None;
-        eprintln!("searching for crates");
-        for c in tcx.all_crate_nums(LOCAL_CRATE).iter() {
-            eprintln!("crate name: {:?}", tcx.crate_name(*c));
-            match &*tcx.crate_name(*c).to_string() {
-                "libstd" => {
-                    std_crate_num = Some(c.clone());
-                    break;
-                },
-                _ => (),
-            }
+
+        eprintln!("DEFID: {:?}", src.def_id);
+        if let Some(_) = src.promoted {
+            return; // We can't add calls to consant functions. Or can we? FIXME
         }
-        eprintln!("searching for crates done");
-        let std_crate_num = std_crate_num.expect("couldn't find std crate num");
+
+        // XXX Find the crate number containing the recorder function.
+        // XXX document magic
+        let rec_fn_defid = if tcx.crate_name(LOCAL_CRATE) == "core" {
+            tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc_wrapper_fn()
+                .expect("couldn't find yk recorder func wrapper")
+        } else {
+            let mut std_crate_num = None;
+            for c in tcx.all_crate_nums(LOCAL_CRATE).iter() {
+                match &*tcx.crate_name(*c).to_string() {
+                    "std" => {
+                        std_crate_num = Some(c.clone());
+                        break;
+                    },
+                    _ => (),
+                }
+            }
+            let std_crate_num = std_crate_num.expect("couldn't find std crate num");
+            tcx.get_lang_items(std_crate_num).yk_swt_record_loc_fn()
+                .expect("couldn't find yk recorder func")
+        };
 
         // Find our recorder function lang item.
-        let rec_fn_defid = tcx.get_lang_items(std_crate_num).yk_swt_record_loc_fn()
-            .expect("couldn't find yk recorder func");
         let rec_fn_substs = Substs::identity_for_item(tcx, rec_fn_defid);
         let rec_fn_ty = tcx.mk_fn_def(rec_fn_defid, rec_fn_substs);
 

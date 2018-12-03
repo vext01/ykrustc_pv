@@ -712,6 +712,7 @@ pub fn const_eval_raw_provider<'a, 'tcx>(
                 // anything else (array lengths, enum initializers, constant patterns) are reported
                 // as hard errors
                 } else {
+                    eprintln!("error def_id is {:?}", def_id);
                     err.report_as_error(
                         ecx.tcx,
                         "evaluation of constant value failed",

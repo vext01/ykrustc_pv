@@ -257,3 +257,16 @@ mod coresimd;
 #[stable(feature = "simd_arch", since = "1.27.0")]
 #[cfg(not(stage0))]
 pub use coresimd::arch;
+
+/// Wrapper function to call the Yorick software trace recorder.
+/// The code for the recorder in in libstd, which is not a proper dependency of libcore. We use a
+/// "weak language item" to make the call possible, but we need a wrapper because we cannot use
+/// weak language items in call terminators in the MIR.
+#[allow(dead_code)] // Used only indirectly in a MIR pass.
+#[cfg_attr(not(stage0), lang="yk_swt_record_loc_wrapper")]
+fn yk_swt_record_loc_wrapper(crate_hash: u64, def_idx: u32, bb: u32) {
+    extern "Rust" {
+        fn yk_swt_record_loc(crate_hash: u64, def_idx: u32, bb: u32);
+    }
+    unsafe { yk_swt_record_loc(crate_hash, def_idx, bb) };
+}
