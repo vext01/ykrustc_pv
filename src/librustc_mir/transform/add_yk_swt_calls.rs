@@ -12,6 +12,10 @@ use rustc::hir::map::blocks::FnLikeNode;
 //use rustc::mir::Place;
 
 fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+    if let Some(_) = src.promoted {
+        return false; // XXX why?
+    }
+
     let node_id = tcx.hir.as_local_node_id(src.def_id)
         .expect("Failed to get node id");
     if let Some(fn_like) = FnLikeNode::from_node(tcx.hir.get(node_id)) {
@@ -33,7 +37,6 @@ impl MirPass for AddYkSWTCalls {
                           src: MirSource,
                           mir: &mut Mir<'tcx>) {
 
-        eprintln!("DEFID: {:?}", src.def_id);
         if !should_annotate(tcx, src) {
             return;
         }
