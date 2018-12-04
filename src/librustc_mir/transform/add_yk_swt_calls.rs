@@ -6,8 +6,22 @@ use rustc::mir::*; // XXX yuck
 use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
 use transform::{MirPass, MirSource};
+use rustc::hir;
 use rustc::hir::def_id::{DefIndex, LOCAL_CRATE};
+use rustc::hir::map::blocks::FnLikeNode;
 //use rustc::mir::Place;
+
+fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+    let node_id = tcx.hir.as_local_node_id(src.def_id)
+        .expect("Failed to get node id");
+    if let Some(fn_like) = FnLikeNode::from_node(tcx.hir.get(node_id)) {
+        // It's a function, but only annotate it if it's non-const.
+        fn_like.constness() != hir::Constness::Const
+    } else {
+        // Not a function.
+        false
+    }
+}
 
 /// A MIR pass which, for each basic inserts a call to `std::yk_swt::record_loc_fn`, passing block
 /// location information.
@@ -20,10 +34,11 @@ impl MirPass for AddYkSWTCalls {
                           mir: &mut Mir<'tcx>) {
 
         eprintln!("DEFID: {:?}", src.def_id);
-        if let Some(_) = src.promoted {
-            return; // We can't add calls to consant functions. Or can we? FIXME
+        if !should_annotate(tcx, src) {
+            return;
         }
 
+        // We can't add calls to consant functions.
         // Find the recorder function language item.
         // The item is in libstd, but if we are compiling libcore, then we have to locate the
         // wrapper for the weak language item instead (libcore cannot depend on libstd).
