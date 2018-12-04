@@ -1,8 +1,8 @@
 // XXX license
 
-use rustc::ty::{self, TyCtxt};
+use rustc::ty::{self, TyCtxt, List};
 use rustc::mir::*; // XXX yuck
-use rustc::ty::subst::Substs;
+//use rustc::ty::subst::Substs;
 use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
 use transform::{MirPass, MirSource};
@@ -24,8 +24,9 @@ impl MirPass for AddYkSWTCalls {
             return; // We can't add calls to consant functions. Or can we? FIXME
         }
 
-        // XXX Find the crate number containing the recorder function.
-        // XXX document magic
+        // Find the recorder function language item.
+        // The item is in libstd, but if we are compiling libcore, then we have to locate the
+        // wrapper for the weak language item instead (libcore cannot depend on libstd).
         let rec_fn_defid = if tcx.crate_name(LOCAL_CRATE) == "core" {
             tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc_wrapper_fn()
                 .expect("couldn't find yk recorder func wrapper")
@@ -44,10 +45,6 @@ impl MirPass for AddYkSWTCalls {
             tcx.get_lang_items(std_crate_num).yk_swt_record_loc_fn()
                 .expect("couldn't find yk recorder func")
         };
-
-        // Find our recorder function lang item.
-        let rec_fn_substs = Substs::identity_for_item(tcx, rec_fn_defid);
-        let rec_fn_ty = tcx.mk_fn_def(rec_fn_defid, rec_fn_substs);
 
         // Types.
         let unit_ty = tcx.mk_unit();
@@ -78,8 +75,6 @@ impl MirPass for AddYkSWTCalls {
             let ret_place = Place::Local(Local::new(num_orig_local_decls + new_local_decls.len()));
             new_local_decls.push(ret_val);
 
-            let crate_hash_decl = LocalDecl::new_temp(u64_ty, DUMMY_SP);
-            new_local_decls.push(crate_hash_decl);
             let crate_hash_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
                 ty: u64_ty,
@@ -87,8 +82,6 @@ impl MirPass for AddYkSWTCalls {
                 literal: ty::Const::from_usize(tcx, local_crate_hash),
             });
 
-            let def_idx_decl = LocalDecl::new_temp(u32_ty, DUMMY_SP);
-            new_local_decls.push(def_idx_decl);
             let def_idx_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
                 ty: u32_ty,
@@ -96,8 +89,6 @@ impl MirPass for AddYkSWTCalls {
                 literal: ty::Const::from_usize(tcx, self.0.as_raw_u32() as u64),
             });
 
-            let bb_decl = LocalDecl::new_temp(u32_ty, DUMMY_SP);
-            new_local_decls.push(bb_decl);
             let bb_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
                 ty: u32_ty,
@@ -105,12 +96,8 @@ impl MirPass for AddYkSWTCalls {
                 literal: ty::Const::from_usize(tcx, bb.index() as u64),
             });
 
-            let rec_fn_oper = Operand::Constant(box Constant {
-                span: DUMMY_SP,
-                ty: rec_fn_ty,
-                user_ty: None,
-                literal: ty::Const::zero_sized(tcx, rec_fn_ty),
-            });
+            let rec_fn_oper = Operand::function_handle(tcx, rec_fn_defid,
+                List::empty(), DUMMY_SP);
 
             let term_kind = TerminatorKind::Call {
                 func: rec_fn_oper,
@@ -129,6 +116,7 @@ impl MirPass for AddYkSWTCalls {
                 }),
                 is_cleanup: false
             };
+            // XXX don't need to store the bb.
             replace_blocks.push((bb.clone(), replace_block));
         }
 
