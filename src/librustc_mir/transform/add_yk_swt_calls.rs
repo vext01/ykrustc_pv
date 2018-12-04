@@ -1,31 +1,21 @@
-// XXX license
+// Copyright 2018 King's College London.
+// Created by the Software Development Team <http://soft-dev.org/>.
+//
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
 
 use rustc::ty::{self, TyCtxt, List};
-use rustc::mir::*; // XXX yuck
-//use rustc::ty::subst::Substs;
+use rustc::mir::{Operand, LocalDecl, Place, SourceInfo, BasicBlock, Local, BasicBlockData,
+    TerminatorKind, Terminator, OUTERMOST_SOURCE_SCOPE, Constant, Mir};
 use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
 use transform::{MirPass, MirSource};
 use rustc::hir;
 use rustc::hir::def_id::{DefIndex, LOCAL_CRATE};
 use rustc::hir::map::blocks::FnLikeNode;
-//use rustc::mir::Place;
-
-fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
-    if let Some(_) = src.promoted {
-        return false; // XXX why?
-    }
-
-    let node_id = tcx.hir.as_local_node_id(src.def_id)
-        .expect("Failed to get node id");
-    if let Some(fn_like) = FnLikeNode::from_node(tcx.hir.get(node_id)) {
-        // It's a function, but only annotate it if it's non-const.
-        fn_like.constness() != hir::Constness::Const
-    } else {
-        // Not a function.
-        false
-    }
-}
 
 /// A MIR pass which, for each basic inserts a call to `std::yk_swt::record_loc_fn`, passing block
 /// location information.
@@ -36,12 +26,10 @@ impl MirPass for AddYkSWTCalls {
                           tcx: TyCtxt<'a, 'tcx, 'tcx>,
                           src: MirSource,
                           mir: &mut Mir<'tcx>) {
-
         if !should_annotate(tcx, src) {
             return;
         }
 
-        // We can't add calls to consant functions.
         // Find the recorder function language item.
         // The item is in libstd, but if we are compiling libcore, then we have to locate the
         // wrapper for the weak language item instead (libcore cannot depend on libstd).
@@ -126,23 +114,40 @@ impl MirPass for AddYkSWTCalls {
             };
 
             // Construct a new block to replace the original one.
+            let source_info = bb_data.terminator.clone().map(|t| t.source_info)
+                .or(Some(SourceInfo { span: DUMMY_SP, scope: OUTERMOST_SOURCE_SCOPE })).unwrap();
             let replace_block = BasicBlockData {
                 statements: vec![],
                 terminator: Some(Terminator {
-                    source_info: SourceInfo { span: DUMMY_SP, scope: OUTERMOST_SOURCE_SCOPE },
+                    source_info,
                     kind: term_kind
                 }),
                 is_cleanup: false
             };
-            // XXX don't need to store the bb.
-            replace_blocks.push((bb.clone(), replace_block));
+            replace_blocks.push(replace_block);
         }
 
         // Finally, commit our transformations.
         mir.basic_blocks_mut().extend(copied_blocks);
         mir.local_decls.extend(new_local_decls);
-        for (bb, bb_data) in replace_blocks {
-            mir.basic_blocks_mut()[bb] = bb_data;
+        for (bb, bb_data) in replace_blocks.drain(..).enumerate() {
+            mir.basic_blocks_mut()[BasicBlock::new(bb)] = bb_data;
         }
+    }
+}
+
+fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+    // We can't add calls to promoted items.
+    if let Some(_) = src.promoted {
+        return false;
+    }
+
+    // We can't add calls to consant functions.
+    let node_id = tcx.hir.as_local_node_id(src.def_id)
+        .expect("Failed to get node id");
+    if let Some(fn_like) = FnLikeNode::from_node(tcx.hir.get(node_id)) {
+        fn_like.constness() != hir::Constness::Const
+    } else {
+        false
     }
 }
