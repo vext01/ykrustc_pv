@@ -30,27 +30,9 @@ impl MirPass for AddYkSWTCalls {
             return;
         }
 
-        // Find the recorder function language item.
-        // The item is in libstd, but if we are compiling libcore, then we have to locate the
-        // wrapper for the weak language item instead (libcore cannot depend on libstd).
-        let rec_fn_defid = if tcx.crate_name(LOCAL_CRATE) == "core" {
-            tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc_wrapper_fn()
-                .expect("couldn't find yk recorder func wrapper")
-        } else {
-            let mut std_crate_num = None;
-            for c in tcx.all_crate_nums(LOCAL_CRATE).iter() {
-                match &*tcx.crate_name(*c).to_string() {
-                    "std" => {
-                        std_crate_num = Some(c.clone());
-                        break;
-                    },
-                    _ => (),
-                }
-            }
-            let std_crate_num = std_crate_num.expect("couldn't find std crate num");
-            tcx.get_lang_items(std_crate_num).yk_swt_record_loc_fn()
-                .expect("couldn't find yk recorder func")
-        };
+        // Find the recorder function. We use the wrapper function in libcore.
+        let rec_fn_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc_wrapper_fn()
+            .expect("couldn't find yk recorder func");
 
         // Types.
         let unit_ty = tcx.mk_unit();
@@ -92,14 +74,14 @@ impl MirPass for AddYkSWTCalls {
                 span: DUMMY_SP,
                 ty: u32_ty,
                 user_ty: None,
-                literal: ty::Const::from_usize(tcx, self.0.as_raw_u32() as u64),
+                literal: ty::Const::from_u32(tcx, self.0.as_raw_u32()),
             });
 
             let bb_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
                 ty: u32_ty,
                 user_ty: None,
-                literal: ty::Const::from_usize(tcx, bb.index() as u64),
+                literal: ty::Const::from_u32(tcx, bb.index() as u32),
             });
 
             let rec_fn_oper = Operand::function_handle(tcx, rec_fn_defid,
@@ -137,6 +119,14 @@ impl MirPass for AddYkSWTCalls {
 }
 
 fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+    // Crates to skip.
+    match &*tcx.crate_name(LOCAL_CRATE).as_str() {
+        "core" | "compiler_builtins" => return false,
+        _ => (),
+    }
+
+    // XXX skip anything which doesn't link libcore?
+
     // We can't add calls to promoted items.
     if let Some(_) = src.promoted {
         return false;
