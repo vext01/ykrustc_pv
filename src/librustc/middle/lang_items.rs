@@ -377,8 +377,9 @@ language_item_table! {
     U128ShroFnLangItem,          "u128_shro",          u128_shro_fn,            Target::Fn;
 
     // Yorick.
-    YkSwtRecordLocLangItem,        "yk_swt_record_loc",          yk_swt_record_loc_fn,         Target::Fn;
-    YkSwtRecordLocLangItemWrapper, "yk_swt_record_loc_wrapper",  yk_swt_record_loc_wrapper_fn, Target::Fn;
+    YkSwtRecordLocLangItem,      "yk_swt_record_loc",  yk_swt_record_loc_fn,    Target::Fn;
+    YkSwtRecordLocLangItemWrapper, "yk_swt_record_loc_wrapper",yk_swt_record_loc_wrapper_fn,
+                                                                                Target::Fn;
 
     // Align offset for stride != 1, must not panic.
     AlignOffsetLangItem,         "align_offset",       align_offset_fn,         Target::Fn;

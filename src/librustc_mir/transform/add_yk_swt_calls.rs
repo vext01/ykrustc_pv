@@ -119,14 +119,6 @@ impl MirPass for AddYkSWTCalls {
 }
 
 fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
-    // Crates to skip.
-    match &*tcx.crate_name(LOCAL_CRATE).as_str() {
-        "core" | "compiler_builtins" => return false,
-        _ => (),
-    }
-
-    // XXX skip anything which doesn't link libcore?
-
     // We can't add calls to promoted items.
     if let Some(_) = src.promoted {
         return false;

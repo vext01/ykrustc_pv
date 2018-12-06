@@ -7,8 +7,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//#![feature(lang_items)]
-
 /// Software tracing support for Yorick.
 
 use ::cell::RefCell;
@@ -26,7 +24,6 @@ thread_local! {
     static SWT_TRACE: RefCell<Vec<MirLoc>> = RefCell::new(Vec::new());
 }
 
-//#[lang = "yk_swt_record_loc"]
 /// Records a location into the current trace.
 #[cfg_attr(not(stage0), lang="yk_swt_record_loc")]
 pub fn record_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {
