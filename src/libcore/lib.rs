@@ -262,11 +262,12 @@ pub use coresimd::arch;
 /// The code for the recorder in in libstd, which is not a proper dependency of libcore. We use a
 /// "weak language item" to make the call possible, but we need a wrapper because we cannot use
 /// weak language items in call terminators in the MIR.
-#[allow(dead_code)] // Used only indirectly in a MIR pass.
+#[allow(dead_code, unused_variables)] // Used only indirectly in a MIR pass.
 #[cfg_attr(not(stage0), lang="yk_swt_record_loc_wrapper")]
 fn yk_swt_record_loc_wrapper(crate_hash: u64, def_idx: u32, bb: u32) {
     extern "Rust" {
         fn yk_swt_record_loc(crate_hash: u64, def_idx: u32, bb: u32);
     }
+    // XXX this crashes the program with "illegal instruction".
     unsafe { yk_swt_record_loc(crate_hash, def_idx, bb) };
 }

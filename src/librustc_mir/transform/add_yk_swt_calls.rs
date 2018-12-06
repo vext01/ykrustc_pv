@@ -67,7 +67,7 @@ impl MirPass for AddYkSWTCalls {
                 span: DUMMY_SP,
                 ty: u64_ty,
                 user_ty: None,
-                literal: ty::Const::from_usize(tcx, local_crate_hash),
+                literal: ty::Const::from_u64(tcx, local_crate_hash),
             });
 
             let def_idx_oper = Operand::Constant(box Constant {
