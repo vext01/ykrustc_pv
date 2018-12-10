@@ -9,8 +9,9 @@
 
 /// Software tracing support for Yorick.
 
-/// Records a location into the current trace.
-#[cfg_attr(not(stage0), lang="yk_swt_record_loc")]
+/// Records a MIR location into the current trace.
+#[cfg_attr(not(stage0), lang="yk_swt_rec_loc")]
 #[allow(unused_variables)]
-pub fn record_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {
+pub fn rec_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {
+    // Not implemented.
 }

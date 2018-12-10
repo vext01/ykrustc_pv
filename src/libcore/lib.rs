@@ -263,11 +263,11 @@ pub use coresimd::arch;
 /// "weak language item" to make the call possible, but we need a wrapper because we cannot use
 /// weak language items in call terminators in the MIR.
 #[allow(dead_code, unused_variables)] // Used only indirectly in a MIR pass.
-#[cfg_attr(not(stage0), lang="yk_swt_record_loc_wrapper")]
-fn yk_swt_record_loc_wrapper(crate_hash: u64, def_idx: u32, bb: u32) {
+#[cfg_attr(not(stage0), lang="yk_swt_rec_loc_wrap")]
+fn yk_swt_rec_loc_wrap(crate_hash: u64, def_idx: u32, bb: u32) {
     extern "Rust" {
-        #[cfg_attr(not(stage0), lang="yk_swt_record_loc")]
-        fn yk_swt_record_loc(crate_hash: u64, def_idx: u32, bb: u32);
+        #[cfg_attr(not(stage0), lang="yk_swt_rec_loc")]
+        fn yk_swt_rec_loc(crate_hash: u64, def_idx: u32, bb: u32);
     }
-    unsafe { yk_swt_record_loc(crate_hash, def_idx, bb) };
+    unsafe { yk_swt_rec_loc(crate_hash, def_idx, bb) };
 }

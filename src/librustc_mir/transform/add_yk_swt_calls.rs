@@ -14,11 +14,11 @@ use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
 use transform::{MirPass, MirSource};
 use rustc::hir;
-use rustc::hir::def_id::{DefIndex, LOCAL_CRATE};
+use rustc::hir::def_id::{DefIndex, LOCAL_CRATE, DefId};
 use rustc::hir::map::blocks::FnLikeNode;
 
-/// A MIR pass which, for each basic inserts a call to `std::yk_swt::record_loc_fn`, passing block
-/// location information.
+/// A MIR pass which, for each basic inserts a call to the software trace recorder, passing
+/// location information as arguments.
 pub struct AddYkSWTCalls(pub DefIndex);
 
 impl MirPass for AddYkSWTCalls {
@@ -26,13 +26,11 @@ impl MirPass for AddYkSWTCalls {
                           tcx: TyCtxt<'a, 'tcx, 'tcx>,
                           src: MirSource,
                           mir: &mut Mir<'tcx>) {
-        if !should_annotate(tcx, src) {
-            return;
-        }
-
-        // Find the recorder function. We use the wrapper function in libcore.
-        let rec_fn_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc_wrapper_fn()
-            .expect("couldn't find yk recorder func");
+        // If we are to annotate this MIR, get the `DefId` of the wrapper to call.
+        let rec_fn_defid = match should_annotate(tcx, src) {
+            None => return,
+            Some(defid) => defid,
+        };
 
         // Types.
         let unit_ty = tcx.mk_unit();
@@ -118,42 +116,45 @@ impl MirPass for AddYkSWTCalls {
     }
 }
 
-fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+/// Given a `MirSource`, decides if we should annotate the correpsonding `MIR`.
+/// Returns `None` if we should not annotate, otherwise `Some(def_id)` where `def_id` is the
+/// `DefId` of the software trace recording wrapper function to insert calls to. 
+fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> Option<DefId> {
     // Never annotate the recorder function wrapper. This would lead to infinite recursion.
-    let rec_wrap_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc_wrapper_fn()
-        .expect("couldn't find yk recorder func");
+    let rec_wrap_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_rec_loc_wrap()
+        .expect("couldn't find software trace recorder function");
 
     if src.def_id == rec_wrap_defid {
-        return false;
+        return None;
     }
 
     // Similarly for the recorder function proper.
-    if let Some(rec_defid) = tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc() {
+    if let Some(rec_defid) = tcx.get_lang_items(LOCAL_CRATE).yk_swt_rec_loc() {
         if src.def_id == rec_defid {
-            return false;
+            return None;
         }
     } else {
         // The real recorded function is not available if the local crate doesn't
         // depend upon libstd.
-        return false;
+        return None;
     }
 
     // We can't add calls to promoted items.
     if let Some(_) = src.promoted {
-        return false;
+        return None;
     }
-
-    //match &*tcx.crate_name(LOCAL_CRATE).as_str() {
-    //    "std" | "core" => return false,
-    //    _ => (),
-    //}
 
     // We can't add calls to consant functions.
     let node_id = tcx.hir.as_local_node_id(src.def_id)
         .expect("Failed to get node id");
     if let Some(fn_like) = FnLikeNode::from_node(tcx.hir.get(node_id)) {
-        fn_like.constness() != hir::Constness::Const
+        if fn_like.constness() == hir::Constness::Const {
+            return None;
+        }
     } else {
-        false
+        return None;
     }
+
+    // We will annotate.
+    Some(rec_wrap_defid)
 }
