@@ -7,11 +7,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-/// Software tracing support for Yorick.
-
 /// Records a MIR location into the current trace.
+/// Marked dead since never called by the user, only by a MIR pass.
 #[cfg_attr(not(stage0), lang="yk_swt_rec_loc")]
-#[allow(unused_variables)]
-pub fn rec_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {
+#[allow(unused_variables,dead_code)]
+fn rec_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {
     // Not implemented.
 }

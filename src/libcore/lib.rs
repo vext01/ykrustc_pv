@@ -229,6 +229,8 @@ mod nonzero;
 mod tuple;
 mod unit;
 
+mod yk_swt;
+
 // Pull in the `coresimd` crate directly into libcore. This is where all the
 // architecture-specific (and vendor-specific) intrinsics are defined. AKA
 // things like SIMD and such. Note that the actual source for all this lies in a
@@ -257,17 +259,3 @@ mod coresimd;
 #[stable(feature = "simd_arch", since = "1.27.0")]
 #[cfg(not(stage0))]
 pub use coresimd::arch;
-
-/// Wrapper function to call the Yorick software trace recorder.
-/// The code for the recorder in in libstd, which is not a proper dependency of libcore. We use a
-/// "weak language item" to make the call possible, but we need a wrapper because we cannot use
-/// weak language items in call terminators in the MIR.
-#[allow(dead_code, unused_variables)] // Used only indirectly in a MIR pass.
-#[cfg_attr(not(stage0), lang="yk_swt_rec_loc_wrap")]
-fn yk_swt_rec_loc_wrap(crate_hash: u64, def_idx: u32, bb: u32) {
-    extern "Rust" {
-        #[cfg_attr(not(stage0), lang="yk_swt_rec_loc")]
-        fn yk_swt_rec_loc(crate_hash: u64, def_idx: u32, bb: u32);
-    }
-    unsafe { yk_swt_rec_loc(crate_hash, def_idx, bb) };
-}
