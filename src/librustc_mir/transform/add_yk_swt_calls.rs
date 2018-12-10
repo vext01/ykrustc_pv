@@ -119,15 +119,34 @@ impl MirPass for AddYkSWTCalls {
 }
 
 fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+    // Never annotate the recorder function wrapper. This would lead to infinite recursion.
+    let rec_wrap_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc_wrapper_fn()
+        .expect("couldn't find yk recorder func");
+
+    if src.def_id == rec_wrap_defid {
+        return false;
+    }
+
+    // Similarly for the recorder function proper.
+    if let Some(rec_defid) = tcx.get_lang_items(LOCAL_CRATE).yk_swt_record_loc() {
+        if src.def_id == rec_defid {
+            return false;
+        }
+    } else {
+        // The real recorded function is not available if the local crate doesn't
+        // depend upon libstd.
+        return false;
+    }
+
     // We can't add calls to promoted items.
     if let Some(_) = src.promoted {
         return false;
     }
 
-    match &*tcx.crate_name(LOCAL_CRATE).as_str() {
-        "std" | "core" => return false,
-        _ => (),
-    }
+    //match &*tcx.crate_name(LOCAL_CRATE).as_str() {
+    //    "std" | "core" => return false,
+    //    _ => (),
+    //}
 
     // We can't add calls to consant functions.
     let node_id = tcx.hir.as_local_node_id(src.def_id)
