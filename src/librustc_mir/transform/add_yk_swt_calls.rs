@@ -124,6 +124,11 @@ fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
         return false;
     }
 
+    match &*tcx.crate_name(LOCAL_CRATE).as_str() {
+        "std" | "core" => return false,
+        _ => (),
+    }
+
     // We can't add calls to consant functions.
     let node_id = tcx.hir.as_local_node_id(src.def_id)
         .expect("Failed to get node id");

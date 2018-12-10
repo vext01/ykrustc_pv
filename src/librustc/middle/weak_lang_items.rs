@@ -42,6 +42,10 @@ pub fn check_crate<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
     if items.eh_personality().is_none() {
         items.missing.push(lang_items::EhPersonalityLangItem);
     }
+    if items.yk_swt_record_loc().is_none() {
+        eprintln!("pushing weak item");
+        items.missing.push(lang_items::YkSwtRecordLocLangItem);
+    }
     if tcx.sess.target.target.options.custom_unwind_resume &
        items.eh_unwind_resume().is_none() {
         items.missing.push(lang_items::EhUnwindResumeLangItem);
@@ -170,5 +174,5 @@ weak_lang_items! {
     oom,                OomLangItem,                rust_oom;
 
     // Yorick
-    yk_swt_record_loc_fn,  YkSwtRecordLocLangItem,     yk_swt_record_loc;
+    yk_swt_record_loc,  YkSwtRecordLocLangItem,     rust_yk_swt_record_loc;
 }

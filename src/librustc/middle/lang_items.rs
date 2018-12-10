@@ -224,6 +224,10 @@ pub fn collect<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) -> LanguageItems {
     tcx.hir.krate().visit_all_item_likes(&mut collector);
     let LanguageItemCollector { mut items, .. } = collector;
     weak_lang_items::check_crate(tcx, &mut items);
+    if items.yk_swt_record_loc_wrapper_fn().is_none() {
+        eprintln!("pushing strong item");
+        items.missing.push(YkSwtRecordLocLangItemWrapper);
+    }
     items
 }
 
@@ -377,7 +381,7 @@ language_item_table! {
     U128ShroFnLangItem,          "u128_shro",          u128_shro_fn,            Target::Fn;
 
     // Yorick.
-    YkSwtRecordLocLangItem,      "yk_swt_record_loc",  yk_swt_record_loc_fn,    Target::Fn;
+    YkSwtRecordLocLangItem,      "yk_swt_record_loc",  yk_swt_record_loc,    Target::Fn;
     YkSwtRecordLocLangItemWrapper, "yk_swt_record_loc_wrapper",yk_swt_record_loc_wrapper_fn,
                                                                                 Target::Fn;
 

@@ -266,8 +266,8 @@ pub use coresimd::arch;
 #[cfg_attr(not(stage0), lang="yk_swt_record_loc_wrapper")]
 fn yk_swt_record_loc_wrapper(crate_hash: u64, def_idx: u32, bb: u32) {
     extern "Rust" {
+        #[cfg_attr(not(stage0), lang="yk_swt_record_loc")]
         fn yk_swt_record_loc(crate_hash: u64, def_idx: u32, bb: u32);
     }
-    // XXX this crashes the program with "illegal instruction".
     unsafe { yk_swt_record_loc(crate_hash, def_idx, bb) };
 }
