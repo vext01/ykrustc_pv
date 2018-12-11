@@ -17,8 +17,8 @@ use rustc::hir;
 use rustc::hir::def_id::{DefIndex, LOCAL_CRATE, DefId};
 use rustc::hir::map::blocks::FnLikeNode;
 
-/// A MIR pass which, for each basic inserts a call to the software trace recorder, passing
-/// location information as arguments.
+/// A MIR pass which, for each basic block, inserts a call to the software trace recorder.
+/// The call arguments passed uniquely identify the MIR location.
 pub struct AddYkSWTCalls(pub DefIndex);
 
 impl MirPass for AddYkSWTCalls {
@@ -27,7 +27,7 @@ impl MirPass for AddYkSWTCalls {
                           src: MirSource,
                           mir: &mut Mir<'tcx>) {
         // If we are to annotate this MIR, get the `DefId` of the wrapper to call.
-        let rec_fn_defid = match should_annotate(tcx, src) {
+        let rec_fn_defid = match get_rec_wrap_defid(tcx, src) {
             None => return,
             Some(defid) => defid,
         };
@@ -37,13 +37,13 @@ impl MirPass for AddYkSWTCalls {
         let u32_ty = tcx.types.u32;
         let u64_ty = tcx.types.u64;
 
-        // Each original block is replaced by a new block which calls the recorder function.
+        // Each block is replaced by a new block whose terminator calls the recorder function.
         let mut replace_blocks = Vec::new();
 
-        // Each original block is copied. The recorder funcion then returns to a copy.
+        // The original blocks are copied and the recorder function returns to a copy.
         let mut copied_blocks = Vec::new();
 
-        // New local declarations are required to set up the calls.
+        // New local decls are required to accomodate the (unit) return value of the recorder func.
         let mut new_local_decls = Vec::new();
 
         let num_orig_blocks = mir.basic_blocks().len();
@@ -51,7 +51,8 @@ impl MirPass for AddYkSWTCalls {
         let local_crate_hash = tcx.crate_hash(LOCAL_CRATE).as_u64();
 
         for (bb, bb_data) in mir.basic_blocks_mut().iter_enumerated() {
-            // Copy the original block and compute its index once pushed into the MIRs block vector.
+            // Copy the original block and compute what its index will be once we have pushed onto
+            // the end of the MIR's basic block vector.
             let new_blk = bb_data.clone();
             let new_blk_idx = BasicBlock::new(num_orig_blocks + copied_blocks.len());
             copied_blocks.push(new_blk);
@@ -116,10 +117,10 @@ impl MirPass for AddYkSWTCalls {
     }
 }
 
-/// Given a `MirSource`, decides if we should annotate the correpsonding `MIR`.
-/// Returns `None` if we should not annotate, otherwise `Some(def_id)` where `def_id` is the
-/// `DefId` of the software trace recording wrapper function to insert calls to. 
-fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> Option<DefId> {
+/// Given a `MirSource`, decides if we should annotate the correpsonding MIR.
+/// Returns `None` if we should not annotate, otherwise returns the `DefId` of the software trace
+/// recording wrapper function.
+fn get_rec_wrap_defid(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> Option<DefId> {
     // Never annotate the recorder function wrapper. This would lead to infinite recursion.
     let rec_wrap_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_rec_loc_wrap()
         .expect("couldn't find software trace recorder function");
@@ -144,7 +145,7 @@ fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> Option<DefId>
         return None;
     }
 
-    // We can't add calls to consant functions.
+    // We can't add calls to constant functions.
     let node_id = tcx.hir.as_local_node_id(src.def_id)
         .expect("Failed to get node id");
     if let Some(fn_like) = FnLikeNode::from_node(tcx.hir.get(node_id)) {
@@ -155,6 +156,5 @@ fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> Option<DefId>
         return None;
     }
 
-    // We will annotate.
     Some(rec_wrap_defid)
 }

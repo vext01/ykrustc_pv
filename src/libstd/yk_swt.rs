@@ -7,8 +7,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-/// Records a MIR location into the current trace.
-/// Marked dead since never called by the user, only by a MIR pass.
+/// The software trace recorder function.
+/// The `AddYkSWTCalls` MIR pass injects a call this for every MIR block. The call is done
+/// indirectly via a wrapper in libcore.
 #[cfg_attr(not(stage0), lang="yk_swt_rec_loc")]
 #[allow(unused_variables,dead_code)]
 fn rec_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {

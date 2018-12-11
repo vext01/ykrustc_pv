@@ -678,7 +678,6 @@ pub fn const_eval_raw_provider<'a, 'tcx>(
             err
         } else if def_id.is_local() {
             // constant defined in this crate, we can figure out a lint level!
-            eprintln!("describe={:?}", tcx.describe_def(def_id));
             match tcx.describe_def(def_id) {
                 // constants never produce a hard error at the definition site. Anything else is
                 // a backwards compatibility hazard (and will break old versions of winapi for sure)
@@ -713,9 +712,6 @@ pub fn const_eval_raw_provider<'a, 'tcx>(
                 // anything else (array lengths, enum initializers, constant patterns) are reported
                 // as hard errors
                 } else {
-                    eprintln!("error def_id is {:?}", def_id);
-                    eprintln!("cid {:?}", cid);
-                    eprintln!("key {:?}", key);
                     err.report_as_error(
                         ecx.tcx,
                         "evaluation of constant value failed",

@@ -7,15 +7,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+/// The software trace recorder function.
+/// This is a weak language item, it actually resides in libstd. It has to be weak to allow libcore
+/// to call up to libstd (libstd is not a dependency of libcore).
 extern "Rust" {
     #[cfg_attr(not(stage0), lang="yk_swt_rec_loc")]
     fn yk_swt_rec_loc(crate_hash: u64, def_idx: u32, bb: u32);
 }
 
-/// Wrapper function to call the Yorick software trace recorder.
-/// The code for the recorder in in libstd, which is not a proper dependency of libcore. We use a
-/// "weak language item" to make the call possible, but we need a wrapper because we cannot use
-/// weak language items in call terminators in the MIR.
+/// Wrapper lang item to call the above wrapper function.
+/// This has to be a lang item too, as a MIR terminator cannot call a weak language item directly.
 #[allow(dead_code, unused_variables)] // Used only indirectly in a MIR pass.
 #[cfg_attr(not(stage0), lang="yk_swt_rec_loc_wrap")]
 fn yk_swt_rec_loc_wrap(crate_hash: u64, def_idx: u32, bb: u32) {
