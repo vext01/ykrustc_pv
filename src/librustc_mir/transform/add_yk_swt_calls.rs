@@ -14,7 +14,7 @@ use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
 use transform::{MirPass, MirSource};
 use rustc::hir;
-use rustc::hir::def_id::{DefIndex, LOCAL_CRATE, DefId};
+use rustc::hir::def_id::{DefIndex, LOCAL_CRATE};
 use rustc::hir::map::blocks::FnLikeNode;
 
 /// A MIR pass which, for each basic block, inserts a call to the software trace recorder.
@@ -27,10 +27,13 @@ impl MirPass for AddYkSWTCalls {
                           src: MirSource,
                           mir: &mut Mir<'tcx>) {
         // If we are to annotate this MIR, get the `DefId` of the wrapper to call.
-        let rec_fn_defid = match get_rec_wrap_defid(tcx, src) {
-            None => return,
-            Some(defid) => defid,
-        };
+        if !should_annotate(tcx, src) {
+            return;
+        }
+
+        // Find the recorder function to call.
+        let rec_fn_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_rec_loc_wrap()
+            .expect("couldn't find software trace recorder function");
 
         // Types.
         let unit_ty = tcx.mk_unit();
@@ -118,31 +121,18 @@ impl MirPass for AddYkSWTCalls {
 }
 
 /// Given a `MirSource`, decides if we should annotate the correpsonding MIR.
-/// Returns `None` if we should not annotate, otherwise returns the `DefId` of the software trace
-/// recording wrapper function.
-fn get_rec_wrap_defid(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> Option<DefId> {
-    // Never annotate the recorder function wrapper. This would lead to infinite recursion.
-    let rec_wrap_defid = tcx.get_lang_items(LOCAL_CRATE).yk_swt_rec_loc_wrap()
-        .expect("couldn't find software trace recorder function");
-
-    if src.def_id == rec_wrap_defid {
-        return None;
-    }
-
-    // Similarly for the recorder function proper.
-    if let Some(rec_defid) = tcx.get_lang_items(LOCAL_CRATE).yk_swt_rec_loc() {
-        if src.def_id == rec_defid {
-            return None;
+fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+    // Never annotate anything marked `#[no_trace]`.
+    // The trace record and wrapper are also marked `#[no_trace]` to prevent infinite recursion.
+    for attr in tcx.get_attrs(src.def_id).iter() {
+        if attr.check_name("no_trace") {
+            return false;
         }
-    } else {
-        // The real recorded function is not available if the local crate doesn't
-        // depend upon libstd.
-        return None;
     }
 
     // We can't add calls to promoted items.
     if let Some(_) = src.promoted {
-        return None;
+        return false;
     }
 
     // We can't add calls to constant functions.
@@ -150,11 +140,11 @@ fn get_rec_wrap_defid(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> Option<Def
         .expect("Failed to get node id");
     if let Some(fn_like) = FnLikeNode::from_node(tcx.hir.get(node_id)) {
         if fn_like.constness() == hir::Constness::Const {
-            return None;
+            return false;
         }
     } else {
-        return None;
+        return false;
     }
 
-    Some(rec_wrap_defid)
+    true
 }

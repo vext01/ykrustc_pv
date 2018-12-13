@@ -12,6 +12,7 @@
 /// indirectly via a wrapper in libcore.
 #[cfg_attr(not(stage0), lang="yk_swt_rec_loc")]
 #[allow(unused_variables,dead_code)]
+#[cfg_attr(not(stage0), no_trace)]
 fn rec_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {
     // Not implemented.
 }
