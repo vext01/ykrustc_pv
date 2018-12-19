@@ -7,11 +7,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unused_imports)]
+
 use rustc::ty::{self, TyCtxt, List};
 use rustc::mir::{Operand, LocalDecl, Place, SourceInfo, BasicBlock, Local, BasicBlockData,
     TerminatorKind, Terminator, OUTERMOST_SOURCE_SCOPE, Constant, Mir};
 use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
+use syntax::attr;
 use transform::{MirPass, MirSource};
 use rustc::hir;
 use rustc::hir::def_id::{DefIndex, LOCAL_CRATE};
@@ -122,12 +125,50 @@ impl MirPass for AddYkSWTCalls {
 
 /// Given a `MirSource`, decides if we should annotate the correpsonding MIR.
 fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
-    // Never annotate anything marked `#[no_trace]`.
+    // Never annotate anything marked `#[no_trace]` or `#[naked]`.
     // The trace record and wrapper are also marked `#[no_trace]` to prevent infinite recursion.
     for attr in tcx.get_attrs(src.def_id).iter() {
         if attr.check_name("no_trace") {
             return false;
         }
+        if attr.check_name("naked") {
+            return false;
+       }
+    }
+
+    // FIXME: libcompiler_builtins does some odd linking gymnastics that I don't understand.
+    // compiler_builtins.93v8l1oj-cgu.1:(.text.__powisf2+0x2c):
+    // undefined reference to `core::yk_swt::yk_swt_rec_loc_wrap'
+    //if tcx.crate_name(LOCAL_CRATE) == "compiler_builtins" {
+    //    return false;
+    //}
+
+    // Works with all the three following checks in place.
+    // not with only 3
+    // not 1 and 3
+    // only 2 and 3 works
+
+    // 1    2   3
+    // X    X   X   YES
+    //          X   NO
+    //  X       X   NO
+    //      X   X   YES
+    //      X       NO
+    //          X   NO
+
+    // FIXME needed?
+    //if tcx.is_foreign_item(src.def_id) {
+    //    return false;
+    //}
+
+    // We can't call the software tracing function if there is no libcore.
+    if attr::contains_name(tcx.hir.krate_attrs(), "no_core") {
+        return false;
+    }
+
+    // Compiler-builtins crate is special.
+    if tcx.is_compiler_builtins(LOCAL_CRATE) {
+        return false;
     }
 
     // We can't add calls to promoted items.
