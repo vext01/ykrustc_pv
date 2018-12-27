@@ -18,6 +18,7 @@
 //------------------------------------------------------------------------------
 // Example from original issue #45222
 
+#[no_trace]
 fn foo2(n: u64) -> u64 {
     let mut count = 0;
     for _ in 0..n {
@@ -29,6 +30,7 @@ fn foo2(n: u64) -> u64 {
 }
 
 // CHECK-LABEL: @check_foo2
+#[no_trace]
 #[no_mangle]
 pub fn check_foo2() -> u64 {
     // CHECK: ret i64 500005000000000
@@ -38,6 +40,7 @@ pub fn check_foo2() -> u64 {
 //------------------------------------------------------------------------------
 // Simplified example of #45222
 
+#[no_trace]
 fn triangle_inc(n: u64) -> u64 {
     let mut count = 0;
     for j in 0 ..= n {
@@ -47,6 +50,7 @@ fn triangle_inc(n: u64) -> u64 {
 }
 
 // CHECK-LABEL: @check_triangle_inc
+#[no_trace]
 #[no_mangle]
 pub fn check_triangle_inc() -> u64 {
     // CHECK: ret i64 5000050000
@@ -56,6 +60,7 @@ pub fn check_triangle_inc() -> u64 {
 //------------------------------------------------------------------------------
 // Demo in #48012
 
+#[no_trace]
 fn foo3r(n: u64) -> u64 {
     let mut count = 0;
     (0..n).for_each(|_| {
@@ -68,6 +73,7 @@ fn foo3r(n: u64) -> u64 {
 
 // CHECK-LABEL: @check_foo3r
 #[no_mangle]
+#[no_trace]
 pub fn check_foo3r() -> u64 {
     // CHECK: ret i64 500005000000000
     foo3r(100000)

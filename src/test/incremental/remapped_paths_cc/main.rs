@@ -24,6 +24,7 @@
 
 extern crate extern_crate;
 
+#[no_trace]
 fn main() {
     some_mod::some_fn();
 }
@@ -31,6 +32,7 @@ fn main() {
 mod some_mod {
     use extern_crate;
 
+    #[no_trace]
     pub fn some_fn() {
         extern_crate::inline_fn();
     }

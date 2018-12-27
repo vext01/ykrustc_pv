@@ -20,9 +20,11 @@
 pub mod x {
     pub struct Foo;
     impl Foo {
+        #[no_trace]
         pub fn foo(&self) { }
     }
 
+    #[no_trace]
     pub fn method() {
         let x: Foo = Foo;
         x.foo(); // inherent methods used to add an edge from Krate
@@ -30,5 +32,6 @@ pub mod x {
 }
 
 #[cfg(cfail1)]
+#[no_trace]
 pub fn bar() { } // remove this unrelated fn in cfail2, which should not affect `x::method`
 

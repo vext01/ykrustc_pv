@@ -28,20 +28,24 @@
 #[cfg(rpass1)]
 pub mod mod1 {
     #[no_mangle]
+    #[no_trace]
     pub fn foo() {}
 }
 
 #[cfg(rpass2)]
 mod mod1 {
     #[no_mangle]
+    #[no_trace]
     pub fn foo() {}
 }
 
 pub mod mod2 {
     #[no_mangle]
+    #[no_trace]
     pub fn bar() {}
 }
 
+#[no_trace]
 fn main() {
     mod1::foo();
 }

@@ -18,6 +18,7 @@
 // CHECK: call void @llvm.memset
 // CHECK-NOT: store
 #[no_mangle]
+#[no_trace]
 pub fn memzero(data: &mut [u8]) {
     for i in 0..data.len() {
         data[i] = 0;

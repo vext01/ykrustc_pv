@@ -18,6 +18,6 @@ pub fn issue_34947(x: i32) -> i32 {
     // CHECK: mul
     // CHECK-NEXT: mul
     // CHECK-NEXT: mul
-    // CHECK-NEXT: ret
+    // CHECK: ret
     x.pow(5)
 }

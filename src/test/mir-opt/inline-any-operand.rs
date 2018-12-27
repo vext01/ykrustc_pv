@@ -29,9 +29,9 @@ fn bar() -> bool {
 // END RUST SOURCE
 // START rustc.bar.Inline.after.mir
 // ...
-// bb0: {
+// bb1: {
 //     ...
-//     _0 = Eq(move _3, move _4);
+//     _0 = Eq(move _4, move _5);
 //     ...
 //     return;
 // }

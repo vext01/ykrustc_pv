@@ -36,6 +36,7 @@ pub mod point {
 
     impl Point {
         #[cfg(cfail1)]
+        #[no_trace]
         pub fn distance_from_point(&self, p: Option<Point>) -> f32 {
             let p = p.unwrap_or(Point { x: 0.0, y: 0.0 });
             let x_diff = self.x - p.x;
@@ -44,6 +45,7 @@ pub mod point {
         }
 
         #[cfg(cfail2)]
+        #[no_trace]
         pub fn distance_from_point(&self, p: Option<&Point>) -> f32 {
             const ORIGIN: &Point = &Point { x: 0.0, y: 0.0 };
             let p = p.unwrap_or(ORIGIN);
@@ -52,6 +54,7 @@ pub mod point {
             return x_diff * x_diff + y_diff * y_diff;
         }
 
+        #[no_trace]
         pub fn x(&self) -> f32 {
             self.x
         }
@@ -63,6 +66,7 @@ pub mod fn_calls_changed_method {
     use point::Point;
 
     #[rustc_dirty(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn check() {
         let p = Point { x: 2.0, y: 2.0 };
         p.distance_from_point(None);
@@ -74,6 +78,7 @@ pub mod fn_calls_another_method {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn check() {
         let p = Point { x: 2.0, y: 2.0 };
         p.x();
@@ -85,6 +90,7 @@ pub mod fn_make_struct {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn make_origin() -> Point {
         Point { x: 2.0, y: 2.0 }
     }
@@ -95,6 +101,7 @@ pub mod fn_read_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn get_x(p: Point) -> f32 {
         p.x
     }
@@ -105,6 +112,7 @@ pub mod fn_write_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn inc_x(p: &mut Point) {
         p.x += 1.0;
     }

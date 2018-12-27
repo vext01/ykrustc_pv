@@ -28,9 +28,9 @@ fn main() {
 // END RUST SOURCE
 // START rustc.test2.Inline.after.mir
 // ...
-// bb0: {
+// bb3: {
 // ...
-//     _0 = const X::y(move _2) -> bb1;
+//     _0 = const X::y(move _2) -> bb2;
 // }
 // ...
 // END rustc.test2.Inline.after.mir

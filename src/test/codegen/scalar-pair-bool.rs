@@ -32,6 +32,7 @@ pub fn pair_i32_bool(pair: (i32, bool)) -> (i32, bool) {
 
 // CHECK: define { i8, i8 } @pair_and_or(i1 zeroext %arg0.0, i1 zeroext %arg0.1)
 #[no_mangle]
+#[no_trace]
 pub fn pair_and_or((a, b): (bool, bool)) -> (bool, bool) {
     // Make sure it can operate directly on the unpacked args
     // CHECK: and i1 %arg0.0, %arg0.1

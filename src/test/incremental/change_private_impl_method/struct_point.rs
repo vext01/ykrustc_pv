@@ -35,6 +35,7 @@ pub mod point {
     }
 
     impl Point {
+        #[no_trace]
         pub fn distance_squared(&self) -> f32 {
             #[cfg(cfail1)]
             return self.x + self.y;
@@ -43,12 +44,14 @@ pub mod point {
             return self.x * self.x + self.y * self.y;
         }
 
+        #[no_trace]
         pub fn distance_from_origin(&self) -> f32 {
             self.distance_squared().sqrt()
         }
     }
 
     impl Point {
+        #[no_trace]
         pub fn translate(&mut self, x: f32, y: f32) {
             self.x += x;
             self.y += y;
@@ -62,6 +65,7 @@ pub mod fn_calls_methods_in_same_impl {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn check() {
         let x = Point { x: 2.0, y: 2.0 };
         x.distance_from_origin();
@@ -73,6 +77,7 @@ pub mod fn_calls_methods_in_another_impl {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn check() {
         let mut x = Point { x: 2.0, y: 2.0 };
         x.translate(3.0, 3.0);
@@ -84,6 +89,7 @@ pub mod fn_make_struct {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn make_origin() -> Point {
         Point { x: 2.0, y: 2.0 }
     }
@@ -94,6 +100,7 @@ pub mod fn_read_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn get_x(p: Point) -> f32 {
         p.x
     }
@@ -104,6 +111,7 @@ pub mod fn_write_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
+    #[no_trace]
     pub fn inc_x(p: &mut Point) {
         p.x += 1.0;
     }

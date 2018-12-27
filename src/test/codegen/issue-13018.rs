@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// FIXME: swt_ignore
+// ignore-test
 // compile-flags: -O
 
 // A drop([...].clone()) sequence on an Rc should be a no-op

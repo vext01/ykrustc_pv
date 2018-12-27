@@ -30,6 +30,7 @@ mod structs {
         pub x: u32,
     }
 
+    #[no_trace]
     pub fn foo(x: X) -> u32 {
         x.x
     }
@@ -48,6 +49,7 @@ mod enums {
         B(u32),
     }
 
+    #[no_trace]
     pub fn foo(x: X) -> u32 {
         match x {
             X::A { x } => x,
@@ -56,6 +58,7 @@ mod enums {
     }
 }
 
+#[no_trace]
 pub fn main() {
     let _ = structs::foo(structs::X { x: 1 });
     let _ = enums::foo(enums::X::A { x: 2 });

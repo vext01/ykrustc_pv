@@ -27,11 +27,13 @@
 //[rpass1] compile-flags: -C debuginfo=1
 //[rpass2] compile-flags: -C debuginfo=1
 
+#[no_trace]
 pub fn main() {
     mod1::some_fn();
 }
 
 mod mod1 {
+    #[no_trace]
     pub fn some_fn() {
         #[cfg(rpass2)]
         {}
