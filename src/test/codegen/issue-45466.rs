@@ -12,13 +12,13 @@
 // min-llvm-version 6.0
 
 #![crate_type="rlib"]
+#![no_trace]
 
 // CHECK-LABEL: @memzero
 // CHECK-NOT: store
 // CHECK: call void @llvm.memset
 // CHECK-NOT: store
 #[no_mangle]
-#[no_trace]
 pub fn memzero(data: &mut [u8]) {
     for i in 0..data.len() {
         data[i] = 0;

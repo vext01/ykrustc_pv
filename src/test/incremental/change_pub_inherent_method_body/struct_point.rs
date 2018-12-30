@@ -18,6 +18,7 @@
 #![feature(rustc_attrs)]
 #![feature(stmt_expr_attributes)]
 #![allow(dead_code)]
+#![no_trace]
 
 #![rustc_partition_codegened(module="struct_point-point", cfg="cfail2")]
 
@@ -34,7 +35,6 @@ pub mod point {
     }
 
     impl Point {
-        #[no_trace]
         pub fn distance_from_origin(&self) -> f32 {
             #[cfg(cfail1)]
             return self.x * self.x + self.y * self.y;
@@ -43,7 +43,6 @@ pub mod point {
             return (self.x * self.x + self.y * self.y).sqrt();
         }
 
-        #[no_trace]
         pub fn x(&self) -> f32 {
             self.x
         }
@@ -55,7 +54,6 @@ pub mod fn_calls_changed_method {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn check() {
         let p = Point { x: 2.0, y: 2.0 };
         p.distance_from_origin();
@@ -67,7 +65,6 @@ pub mod fn_calls_another_method {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn check() {
         let p = Point { x: 2.0, y: 2.0 };
         p.x();
@@ -79,7 +76,6 @@ pub mod fn_make_struct {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn make_origin() -> Point {
         Point { x: 2.0, y: 2.0 }
     }
@@ -90,7 +86,6 @@ pub mod fn_read_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn get_x(p: Point) -> f32 {
         p.x
     }
@@ -101,7 +96,6 @@ pub mod fn_write_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn inc_x(p: &mut Point) {
         p.x += 1.0;
     }

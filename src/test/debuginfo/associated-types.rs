@@ -93,6 +93,7 @@
 #![allow(dead_code)]
 #![feature(omit_gdb_pretty_printer_section)]
 #![omit_gdb_pretty_printer_section]
+#![no_trace]
 
 trait TraitWithAssocType {
     type Type;
@@ -102,7 +103,6 @@ trait TraitWithAssocType {
 impl TraitWithAssocType for i32 {
     type Type = i64;
 
-    #[no_trace]
     fn get_value(&self) -> i64 { *self as i64 }
 }
 
@@ -116,12 +116,10 @@ enum Enum<T: TraitWithAssocType> {
     Variant2(T::Type, T)
 }
 
-#[no_trace]
 fn assoc_struct<T: TraitWithAssocType>(arg: Struct<T>) {
     zzz(); // #break
 }
 
-#[no_trace]
 fn assoc_local<T: TraitWithAssocType>(x: T) {
     let inferred = x.get_value();
     let explicitly: T::Type = x.get_value();
@@ -129,22 +127,18 @@ fn assoc_local<T: TraitWithAssocType>(x: T) {
     zzz(); // #break
 }
 
-#[no_trace]
 fn assoc_arg<T: TraitWithAssocType>(arg: T::Type) {
     zzz(); // #break
 }
 
-#[no_trace]
 fn assoc_return_value<T: TraitWithAssocType>(arg: T) -> T::Type {
     return arg.get_value();
 }
 
-#[no_trace]
 fn assoc_tuple<T: TraitWithAssocType>(arg: (T, T::Type)) {
     zzz(); // #break
 }
 
-#[no_trace]
 fn assoc_enum<T: TraitWithAssocType>(arg: Enum<T>) {
 
     match arg {
@@ -157,7 +151,6 @@ fn assoc_enum<T: TraitWithAssocType>(arg: Enum<T>) {
     }
 }
 
-#[no_trace]
 fn main() {
     assoc_struct(Struct { b: -1, b1: 0 });
     assoc_local(1);
@@ -168,5 +161,4 @@ fn main() {
     assoc_enum(Enum::Variant2(8, 9));
 }
 
-#[no_trace]
 fn zzz() { () }

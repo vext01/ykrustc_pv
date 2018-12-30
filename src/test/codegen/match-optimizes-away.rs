@@ -11,13 +11,13 @@
 // no-system-llvm
 // compile-flags: -O
 #![crate_type="lib"]
+#![no_trace]
 
 pub enum Three { A, B, C }
 
 pub enum Four { A, B, C, D }
 
 #[no_mangle]
-#[no_trace]
 pub fn three_valued(x: Three) -> Three {
     // CHECK-LABEL: @three_valued
     // CHECK-NEXT: {{^.*:$}}
@@ -30,7 +30,6 @@ pub fn three_valued(x: Three) -> Three {
 }
 
 #[no_mangle]
-#[no_trace]
 pub fn four_valued(x: Four) -> Four {
     // CHECK-LABEL: @four_valued
     // CHECK-NEXT: {{^.*:$}}

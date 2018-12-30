@@ -18,6 +18,7 @@
 
 #![feature(rustc_attrs)]
 #![crate_type="rlib"]
+#![no_trace]
 
 #![rustc_expected_cgu_reuse(module="independent_cgus_dont_affect_each_other-foo",
                             cfg="cfail2",
@@ -42,13 +43,11 @@
 mod foo {
 
     #[cfg(cfail1)]
-    #[no_trace]
     pub fn inlined_fn() -> u32 {
         1234
     }
 
     #[cfg(not(cfail1))]
-    #[no_trace]
     pub fn inlined_fn() -> u32 {
         1234
     }
@@ -57,14 +56,12 @@ mod foo {
 pub mod bar {
     use foo::inlined_fn;
 
-    #[no_trace]
     pub fn caller() -> u32 {
         inlined_fn()
     }
 }
 
 pub mod baz {
-    #[no_trace]
     pub fn unrelated_to_other_fns() -> u64 {
         0xbeef
     }

@@ -16,6 +16,7 @@
 
 #![rustc_partition_codegened(module="change_symbol_export_status-mod1", cfg="rpass2")]
 #![rustc_partition_reused(module="change_symbol_export_status-mod2", cfg="rpass2")]
+#![no_trace]
 
 // This test case makes sure that a change in symbol visibility is detected by
 // our dependency tracking. We do this by changing a module's visibility to
@@ -28,24 +29,20 @@
 #[cfg(rpass1)]
 pub mod mod1 {
     #[no_mangle]
-    #[no_trace]
     pub fn foo() {}
 }
 
 #[cfg(rpass2)]
 mod mod1 {
     #[no_mangle]
-    #[no_trace]
     pub fn foo() {}
 }
 
 pub mod mod2 {
     #[no_mangle]
-    #[no_trace]
     pub fn bar() {}
 }
 
-#[no_trace]
 fn main() {
     mod1::foo();
 }

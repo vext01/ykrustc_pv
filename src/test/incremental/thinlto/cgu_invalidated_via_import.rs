@@ -19,6 +19,7 @@
 
 #![feature(rustc_attrs)]
 #![crate_type="rlib"]
+#![no_trace]
 
 #![rustc_expected_cgu_reuse(module="cgu_invalidated_via_import-foo",
                             cfg="cfail2",
@@ -38,13 +39,11 @@ mod foo {
 
     // Trivial functions like this one are imported very reliably by ThinLTO.
     #[cfg(cfail1)]
-    #[no_trace]
     pub fn inlined_fn() -> u32 {
         1234
     }
 
     #[cfg(not(cfail1))]
-    #[no_trace]
     pub fn inlined_fn() -> u32 {
         1234
     }
@@ -53,7 +52,6 @@ mod foo {
 pub mod bar {
     use foo::inlined_fn;
 
-    #[no_trace]
     pub fn caller() -> u32 {
         inlined_fn()
     }

@@ -16,6 +16,7 @@
 // are changed, even when the change happens in an external crate.
 
 #![feature(rustc_attrs)]
+#![no_trace]
 
 #![rustc_partition_reused(module="main", cfg="rpass2")]
 #![rustc_partition_reused(module="main-some_mod", cfg="rpass2")]
@@ -24,7 +25,6 @@
 
 extern crate extern_crate;
 
-#[no_trace]
 fn main() {
     some_mod::some_fn();
 }
@@ -32,7 +32,6 @@ fn main() {
 mod some_mod {
     use extern_crate;
 
-    #[no_trace]
     pub fn some_fn() {
         extern_crate::inline_fn();
     }

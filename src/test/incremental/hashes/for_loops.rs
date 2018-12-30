@@ -23,11 +23,11 @@
 #![allow(warnings)]
 #![feature(rustc_attrs)]
 #![crate_type="rlib"]
+#![no_trace]
 
 
 // Change loop body ------------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_loop_body() {
     let mut _x = 0;
     for _ in 0..1 {
@@ -39,7 +39,6 @@ pub fn change_loop_body() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_loop_body() {
     let mut _x = 0;
     for _ in 0..1 {
@@ -52,7 +51,6 @@ pub fn change_loop_body() {
 
 // Change iteration variable name ----------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_iteration_variable_name() {
     let mut _x = 0;
     for _i in 0..1 {
@@ -64,7 +62,6 @@ pub fn change_iteration_variable_name() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_iteration_variable_name() {
     let mut _x = 0;
     for _a in 0..1 {
@@ -77,7 +74,6 @@ pub fn change_iteration_variable_name() {
 
 // Change iteration variable pattern -------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_iteration_variable_pattern() {
     let mut _x = 0;
     for _i in &[0, 1, 2] {
@@ -89,7 +85,6 @@ pub fn change_iteration_variable_pattern() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized, TypeckTables")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_iteration_variable_pattern() {
     let mut _x = 0;
     for &_i in &[0, 1, 2] {
@@ -102,7 +97,6 @@ pub fn change_iteration_variable_pattern() {
 
 // Change iterable -------------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_iterable() {
     let mut _x = 0;
     for _ in &[0, 1, 2] {
@@ -114,7 +108,6 @@ pub fn change_iterable() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_iterable() {
     let mut _x = 0;
     for _ in &[0, 1, 3] {
@@ -127,7 +120,6 @@ pub fn change_iterable() {
 
 // Add break -------------------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn add_break() {
     let mut _x = 0;
     for _ in 0..1 {
@@ -138,7 +130,6 @@ pub fn add_break() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized, TypeckTables")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn add_break() {
     let mut _x = 0;
     for _ in 0..1 {
@@ -151,7 +142,6 @@ pub fn add_break() {
 
 // Add loop label --------------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn add_loop_label() {
     let mut _x = 0;
     for _ in 0..1 {
@@ -163,7 +153,6 @@ pub fn add_loop_label() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn add_loop_label() {
     let mut _x = 0;
     'label: for _ in 0..1 {
@@ -176,7 +165,6 @@ pub fn add_loop_label() {
 
 // Add loop label to break -----------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn add_loop_label_to_break() {
     let mut _x = 0;
     'label: for _ in 0..1 {
@@ -188,7 +176,6 @@ pub fn add_loop_label_to_break() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn add_loop_label_to_break() {
     let mut _x = 0;
     'label: for _ in 0..1 {
@@ -201,7 +188,6 @@ pub fn add_loop_label_to_break() {
 
 // Change break label ----------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_break_label() {
     let mut _x = 0;
     'outer: for _ in 0..1 {
@@ -215,7 +201,6 @@ pub fn change_break_label() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_break_label() {
     let mut _x = 0;
     'outer: for _ in 0..1 {
@@ -230,7 +215,6 @@ pub fn change_break_label() {
 
 // Add loop label to continue --------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn add_loop_label_to_continue() {
     let mut _x = 0;
     'label: for _ in 0..1 {
@@ -242,7 +226,6 @@ pub fn add_loop_label_to_continue() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn add_loop_label_to_continue() {
     let mut _x = 0;
     'label: for _ in 0..1 {
@@ -255,7 +238,6 @@ pub fn add_loop_label_to_continue() {
 
 // Change continue label ----------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_continue_label() {
     let mut _x = 0;
     'outer: for _ in 0..1 {
@@ -269,7 +251,6 @@ pub fn change_continue_label() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_continue_label() {
     let mut _x = 0;
     'outer: for _ in 0..1 {
@@ -284,7 +265,6 @@ pub fn change_continue_label() {
 
 // Change continue to break ----------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_continue_to_break() {
     let mut _x = 0;
     for _ in 0..1 {
@@ -296,7 +276,6 @@ pub fn change_continue_to_break() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_continue_to_break() {
     let mut _x = 0;
     for _ in 0..1 {

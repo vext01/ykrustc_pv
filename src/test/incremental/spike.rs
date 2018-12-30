@@ -20,6 +20,7 @@
 #![rustc_partition_reused(module="spike", cfg="rpass2")]
 #![rustc_partition_codegened(module="spike-x", cfg="rpass2")]
 #![rustc_partition_reused(module="spike-y", cfg="rpass2")]
+#![no_trace]
 
 mod x {
     pub struct X {
@@ -27,23 +28,19 @@ mod x {
     }
 
     #[cfg(rpass1)]
-    #[no_trace]
     fn make() -> X {
         X { x: 22, y: 0 }
     }
 
     #[cfg(rpass2)]
-    #[no_trace]
     fn make() -> X {
         X { x: 11, y: 11 }
     }
 
-    #[no_trace]
     pub fn new() -> X {
         make()
     }
 
-    #[no_trace]
     pub fn sum(x: &X) -> u32 {
         x.x + x.y
     }
@@ -52,14 +49,12 @@ mod x {
 mod y {
     use x;
 
-    #[no_trace]
     pub fn assert_sum() -> bool {
         let x = x::new();
         x::sum(&x) == 22
     }
 }
 
-#[no_trace]
 pub fn main() {
     y::assert_sum();
 }

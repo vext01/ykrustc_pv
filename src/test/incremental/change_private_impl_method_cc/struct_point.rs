@@ -20,6 +20,7 @@
 #![feature(rustc_attrs)]
 #![feature(stmt_expr_attributes)]
 #![allow(dead_code)]
+#![no_trace]
 
 #![rustc_partition_reused(module="struct_point-fn_read_field", cfg="cfail2")]
 #![rustc_partition_reused(module="struct_point-fn_write_field", cfg="cfail2")]
@@ -35,7 +36,6 @@ pub mod fn_calls_methods_in_same_impl {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn check() {
         let x = Point { x: 2.0, y: 2.0 };
         x.distance_from_origin();
@@ -47,7 +47,6 @@ pub mod fn_calls_methods_in_another_impl {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn dirty() {
         let mut x = Point { x: 2.0, y: 2.0 };
         x.translate(3.0, 3.0);
@@ -59,7 +58,6 @@ pub mod fn_make_struct {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn make_origin() -> Point {
         Point { x: 2.0, y: 2.0 }
     }
@@ -70,7 +68,6 @@ pub mod fn_read_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn get_x(p: Point) -> f32 {
         p.x
     }
@@ -81,7 +78,6 @@ pub mod fn_write_field {
     use point::Point;
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
-    #[no_trace]
     pub fn inc_x(p: &mut Point) {
         p.x += 1.0;
     }

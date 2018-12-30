@@ -23,11 +23,11 @@
 #![allow(warnings)]
 #![feature(rustc_attrs)]
 #![crate_type="rlib"]
+#![no_trace]
 
 
 // Change closure body ---------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_closure_body() {
     let _ = || 1u32;
 }
@@ -35,7 +35,6 @@ pub fn change_closure_body() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_closure_body() {
     let _ = || 3u32;
 }
@@ -44,7 +43,6 @@ pub fn change_closure_body() {
 
 // Add parameter ---------------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn add_parameter() {
     let x = 0u32;
     let _ = || x + 1;
@@ -53,7 +51,6 @@ pub fn add_parameter() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized, TypeckTables")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn add_parameter() {
     let x = 0u32;
     let _ = |x: u32| x + 1;
@@ -63,7 +60,6 @@ pub fn add_parameter() {
 
 // Change parameter pattern ----------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_parameter_pattern() {
     let _ = |x: &u32| x;
 }
@@ -71,7 +67,6 @@ pub fn change_parameter_pattern() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, TypeckTables")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_parameter_pattern() {
     let _ = |&x: &u32| x;
 }
@@ -80,7 +75,6 @@ pub fn change_parameter_pattern() {
 
 // Add `move` to closure -------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn add_move() {
     let _ = || 1;
 }
@@ -88,7 +82,6 @@ pub fn add_move() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn add_move() {
     let _ = move || 1;
 }
@@ -97,7 +90,6 @@ pub fn add_move() {
 
 // Add type ascription to parameter --------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn add_type_ascription_to_parameter() {
     let closure = |x| x + 1u32;
     let _: u32 = closure(1);
@@ -106,7 +98,6 @@ pub fn add_type_ascription_to_parameter() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, TypeckTables")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn add_type_ascription_to_parameter() {
     let closure = |x: u32| x + 1u32;
     let _: u32 = closure(1);
@@ -116,7 +107,6 @@ pub fn add_type_ascription_to_parameter() {
 
 // Change parameter type -------------------------------------------------------
 #[cfg(cfail1)]
-#[no_trace]
 pub fn change_parameter_type() {
     let closure = |x: u32| (x as u64) + 1;
     let _ = closure(1);
@@ -125,7 +115,6 @@ pub fn change_parameter_type() {
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized, TypeckTables")]
 #[rustc_clean(cfg="cfail3")]
-#[no_trace]
 pub fn change_parameter_type() {
     let closure = |x: u16| (x as u64) + 1;
     let _ = closure(1);

@@ -11,8 +11,8 @@
 // no-system-llvm
 // compile-flags: -O -C panic=abort
 #![crate_type = "lib"]
+#![no_trace]
 
-#[no_trace]
 fn search<T: Ord + Eq>(arr: &mut [T], a: &T) -> Result<usize, ()> {
     match arr.iter().position(|x| x == a) {
         Some(p) => {
@@ -24,7 +24,6 @@ fn search<T: Ord + Eq>(arr: &mut [T], a: &T) -> Result<usize, ()> {
 
 // CHECK-LABEL: @position_no_bounds_check
 #[no_mangle]
-#[no_trace]
 pub fn position_no_bounds_check(y: &mut [u32], x: &u32, z: &u32) -> bool {
     // This contains "call assume" so we cannot just rule out all calls
     // CHECK-NOT: panic_bounds_check

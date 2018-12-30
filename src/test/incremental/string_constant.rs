@@ -15,6 +15,7 @@
 #![allow(warnings)]
 #![feature(rustc_attrs)]
 #![crate_type = "rlib"]
+#![no_trace]
 
 // Here the only thing which changes is the string constant in `x`.
 // Therefore, the compiler deduces (correctly) that typeck is not
@@ -23,7 +24,6 @@
 
 pub mod x {
     #[cfg(cfail1)]
-    #[no_trace]
     pub fn x() {
         println!("{}", "1");
     }
@@ -31,7 +31,6 @@ pub mod x {
     #[cfg(cfail2)]
     #[rustc_dirty(label="HirBody", cfg="cfail2")]
     #[rustc_dirty(label="MirOptimized", cfg="cfail2")]
-    #[no_trace]
     pub fn x() {
         println!("{}", "2");
     }
@@ -42,7 +41,6 @@ pub mod y {
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
     #[rustc_clean(label="MirOptimized", cfg="cfail2")]
-    #[no_trace]
     pub fn y() {
         x::x();
     }
@@ -53,7 +51,6 @@ pub mod z {
 
     #[rustc_clean(label="TypeckTables", cfg="cfail2")]
     #[rustc_clean(label="MirOptimized", cfg="cfail2")]
-    #[no_trace]
     pub fn z() {
         y::y();
     }

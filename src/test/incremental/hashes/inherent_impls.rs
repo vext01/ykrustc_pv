@@ -24,13 +24,13 @@
 #![allow(warnings)]
 #![feature(rustc_attrs)]
 #![crate_type="rlib"]
+#![no_trace]
 
 pub struct Foo;
 
 // Change Method Name -----------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn method_name() { }
 }
 
@@ -39,7 +39,6 @@ impl Foo {
 #[rustc_clean(cfg="cfail3")]
 impl Foo {
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn method_name2() { }
 }
 
@@ -48,7 +47,6 @@ impl Foo {
 // This should affect the method itself, but not the impl.
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn method_body() { }
 }
 
@@ -58,7 +56,6 @@ impl Foo {
 impl Foo {
     #[rustc_clean(cfg="cfail2", except="HirBody,MirOptimized,MirValidated,TypeckTables")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn method_body() {
         println!("Hello, world!");
     }
@@ -71,7 +68,6 @@ impl Foo {
 #[cfg(cfail1)]
 impl Foo {
     #[inline]
-    #[no_trace]
     pub fn method_body_inlined() { }
 }
 
@@ -82,7 +78,6 @@ impl Foo {
     #[rustc_clean(cfg="cfail2", except="HirBody,MirOptimized,MirValidated,TypeckTables")]
     #[rustc_clean(cfg="cfail3")]
     #[inline]
-    #[no_trace]
     pub fn method_body_inlined() {
         println!("Hello, world!");
     }
@@ -92,7 +87,6 @@ impl Foo {
 // Change Method Privacy -------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn method_privacy() { }
 }
 
@@ -102,14 +96,12 @@ impl Foo {
 impl Foo {
     #[rustc_clean(cfg="cfail2", except="AssociatedItems,Hir,HirBody")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     fn method_privacy() { }
 }
 
 // Change Method Selfness -----------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn method_selfness() { }
 }
 
@@ -119,14 +111,12 @@ impl Foo {
 impl Foo {
     #[rustc_dirty(cfg="cfail2", except="TypeOfItem,PredicatesOfItem")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn method_selfness(&self) { }
 }
 
 // Change Method Selfmutness ---------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn method_selfmutness(&self) { }
 }
 
@@ -139,7 +129,6 @@ impl Foo {
         except="Hir,HirBody,FnSignature,TypeckTables,MirOptimized,MirValidated"
     )]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn method_selfmutness(&mut self) { }
 }
 
@@ -148,7 +137,6 @@ impl Foo {
 // Add Method To Impl ----------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_method_to_impl1(&self) { }
 }
 
@@ -158,11 +146,9 @@ impl Foo {
 impl Foo {
     #[rustc_clean(cfg="cfail2")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_method_to_impl1(&self) { }
 
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_method_to_impl2(&self) { }
 }
 
@@ -171,7 +157,6 @@ impl Foo {
 // Add Method Parameter --------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_method_parameter(&self) { }
 }
 
@@ -184,7 +169,6 @@ impl Foo {
         except="Hir,HirBody,FnSignature,TypeckTables,MirOptimized,MirValidated"
     )]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_method_parameter(&self, _: i32) { }
 }
 
@@ -193,7 +177,6 @@ impl Foo {
 // Change Method Parameter Name ------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn change_method_parameter_name(&self, a: i64) { }
 }
 
@@ -203,7 +186,6 @@ impl Foo {
 impl Foo {
     #[rustc_clean(cfg="cfail2", except="HirBody,MirOptimized,MirValidated")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn change_method_parameter_name(&self, b: i64) { }
 }
 
@@ -212,7 +194,6 @@ impl Foo {
 // Change Method Return Type ---------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn change_method_return_type(&self) -> u16 { 0 }
 }
 
@@ -224,7 +205,6 @@ impl Foo {
         cfg="cfail2",
         except="Hir,HirBody,FnSignature,MirOptimized,MirValidated,TypeckTables")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn change_method_return_type(&self) -> u8 { 0 }
 }
 
@@ -233,7 +213,6 @@ impl Foo {
 // Make Method #[inline] -------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn make_method_inline(&self) -> u8 { 0 }
 }
 
@@ -244,7 +223,6 @@ impl Foo {
     #[rustc_clean(cfg="cfail2", except="Hir,HirBody")]
     #[rustc_clean(cfg="cfail3")]
     #[inline]
-    #[no_trace]
     pub fn make_method_inline(&self) -> u8 { 0 }
 }
 
@@ -253,7 +231,6 @@ impl Foo {
 //  Change order of parameters -------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn change_method_parameter_order(&self, a: i64, b: i64) { }
 }
 
@@ -263,7 +240,6 @@ impl Foo {
 impl Foo {
     #[rustc_clean(cfg="cfail2", except="HirBody,MirOptimized,MirValidated")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn change_method_parameter_order(&self, b: i64, a: i64) { }
 }
 
@@ -272,7 +248,6 @@ impl Foo {
 // Make method unsafe ----------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn make_method_unsafe(&self) { }
 }
 
@@ -285,7 +260,6 @@ impl Foo {
         except="Hir,HirBody,FnSignature,TypeckTables,MirOptimized,MirValidated"
     )]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub unsafe fn make_method_unsafe(&self) { }
 }
 
@@ -294,7 +268,6 @@ impl Foo {
 // Make method extern ----------------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn make_method_extern(&self) { }
 }
 
@@ -304,7 +277,6 @@ impl Foo {
 impl Foo {
     #[rustc_clean(cfg="cfail2", except="Hir,HirBody,FnSignature,TypeckTables")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub extern fn make_method_extern(&self) { }
 }
 
@@ -313,7 +285,6 @@ impl Foo {
 // Change method calling convention --------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub extern "C" fn change_method_calling_convention(&self) { }
 }
 
@@ -323,7 +294,6 @@ impl Foo {
 impl Foo {
     #[rustc_clean(cfg="cfail2", except="Hir,HirBody,FnSignature,TypeckTables")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub extern "system" fn change_method_calling_convention(&self) { }
 }
 
@@ -332,7 +302,6 @@ impl Foo {
 // Add Lifetime Parameter to Method --------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_lifetime_parameter_to_method(&self) { }
 }
 
@@ -351,7 +320,6 @@ impl Foo {
     // `TypeckTables` appear dirty, that might be the cause. -nmatsakis
     #[rustc_clean(cfg="cfail2", except="Hir,HirBody")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_lifetime_parameter_to_method<'a>(&self) { }
 }
 
@@ -360,7 +328,6 @@ impl Foo {
 // Add Type Parameter To Method ------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_type_parameter_to_method(&self) { }
 }
 
@@ -382,7 +349,6 @@ impl Foo {
         except="Hir,HirBody,GenericsOfItem,PredicatesOfItem,TypeOfItem",
     )]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_type_parameter_to_method<T>(&self) { }
 }
 
@@ -391,7 +357,6 @@ impl Foo {
 // Add Lifetime Bound to Lifetime Parameter of Method --------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_lifetime_bound_to_lifetime_param_of_method<'a, 'b>(&self) { }
 }
 
@@ -404,7 +369,6 @@ impl Foo {
         except="Hir,HirBody,GenericsOfItem,PredicatesOfItem,TypeOfItem,TypeckTables"
     )]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_lifetime_bound_to_lifetime_param_of_method<'a, 'b: 'a>(&self) { }
 }
 
@@ -413,7 +377,6 @@ impl Foo {
 // Add Lifetime Bound to Type Parameter of Method ------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_lifetime_bound_to_type_param_of_method<'a, T>(&self) { }
 }
 
@@ -433,7 +396,6 @@ impl Foo {
     #[rustc_clean(cfg="cfail2", except="Hir,HirBody,GenericsOfItem,PredicatesOfItem,\
                                         TypeOfItem")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_lifetime_bound_to_type_param_of_method<'a, T: 'a>(&self) { }
 }
 
@@ -442,7 +404,6 @@ impl Foo {
 // Add Trait Bound to Type Parameter of Method ------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_trait_bound_to_type_param_of_method<T>(&self) { }
 }
 
@@ -461,7 +422,6 @@ impl Foo {
     // appear dirty, that might be the cause. -nmatsakis
     #[rustc_clean(cfg="cfail2", except="Hir,HirBody,PredicatesOfItem")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_trait_bound_to_type_param_of_method<T: Clone>(&self) { }
 }
 
@@ -470,7 +430,6 @@ impl Foo {
 // Add #[no_mangle] to Method --------------------------------------------------
 #[cfg(cfail1)]
 impl Foo {
-    #[no_trace]
     pub fn add_no_mangle_to_method(&self) { }
 }
 
@@ -481,7 +440,6 @@ impl Foo {
     #[rustc_clean(cfg="cfail2", except="Hir,HirBody")]
     #[rustc_clean(cfg="cfail3")]
     #[no_mangle]
-    #[no_trace]
     pub fn add_no_mangle_to_method(&self) { }
 }
 
@@ -492,7 +450,6 @@ struct Bar<T>(T);
 // Add Type Parameter To Impl --------------------------------------------------
 #[cfg(cfail1)]
 impl Bar<u32> {
-    #[no_trace]
     pub fn add_type_parameter_to_impl(&self) { }
 }
 
@@ -505,7 +462,6 @@ impl<T> Bar<T> {
         except="GenericsOfItem,FnSignature,TypeckTables,TypeOfItem,MirOptimized,MirValidated"
     )]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_type_parameter_to_impl(&self) { }
 }
 
@@ -514,7 +470,6 @@ impl<T> Bar<T> {
 // Change Self Type of Impl ----------------------------------------------------
 #[cfg(cfail1)]
 impl Bar<u32> {
-    #[no_trace]
     pub fn change_impl_self_type(&self) { }
 }
 
@@ -524,7 +479,6 @@ impl Bar<u32> {
 impl Bar<u64> {
     #[rustc_clean(cfg="cfail2", except="FnSignature,MirOptimized,MirValidated,TypeckTables")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn change_impl_self_type(&self) { }
 }
 
@@ -533,7 +487,6 @@ impl Bar<u64> {
 // Add Lifetime Bound to Impl --------------------------------------------------
 #[cfg(cfail1)]
 impl<T> Bar<T> {
-    #[no_trace]
     pub fn add_lifetime_bound_to_impl_parameter(&self) { }
 }
 
@@ -543,7 +496,6 @@ impl<T> Bar<T> {
 impl<T: 'static> Bar<T> {
     #[rustc_clean(cfg="cfail2")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_lifetime_bound_to_impl_parameter(&self) { }
 }
 
@@ -552,7 +504,6 @@ impl<T: 'static> Bar<T> {
 // Add Trait Bound to Impl Parameter -------------------------------------------
 #[cfg(cfail1)]
 impl<T> Bar<T> {
-    #[no_trace]
     pub fn add_trait_bound_to_impl_parameter(&self) { }
 }
 
@@ -562,13 +513,11 @@ impl<T> Bar<T> {
 impl<T: Clone> Bar<T> {
     #[rustc_clean(cfg="cfail2")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn add_trait_bound_to_impl_parameter(&self) { }
 }
 
 
 // Force instantiation of some fns so we can check their hash.
-#[no_trace]
 pub fn instantiation_root() {
     Foo::method_privacy();
 

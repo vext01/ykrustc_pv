@@ -21,8 +21,8 @@
 // compile-pass
 
 #![feature(rustc_attrs)]
+#![no_trace]
 
-#[no_trace]
 fn main() {
     a::foo();
     b::bar();
@@ -30,7 +30,6 @@ fn main() {
 
 mod a {
     #[cfg(cfail1)]
-    #[no_trace]
     pub fn foo() {
         let x = vec![1, 2, 3];
         let v = || ::std::mem::drop(x);
@@ -38,7 +37,6 @@ mod a {
     }
 
     #[cfg(not(cfail1))]
-    #[no_trace]
     pub fn foo() {
         let x = vec![1, 2, 3, 4];
         let v = || ::std::mem::drop(x);
@@ -49,7 +47,6 @@ mod a {
 mod b {
     #[rustc_clean(cfg="cfail2")]
     #[rustc_clean(cfg="cfail3")]
-    #[no_trace]
     pub fn bar() {
         let x = vec![1, 2, 3];
         let v = || ::std::mem::drop(x);

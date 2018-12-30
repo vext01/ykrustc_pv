@@ -17,12 +17,12 @@
 
 #![feature(rustc_attrs)]
 #![crate_type = "bin"]
+#![no_trace]
 
 #![rustc_partition_reused(module="main", cfg="rpass2")]
 
 extern crate a;
 
-#[no_trace]
 pub fn main() {
     let vec: Vec<u8> = vec![0, 1, 2, 3];
     for &b in &vec {
