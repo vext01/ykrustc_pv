@@ -7,8 +7,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_imports)]
-
 use rustc::ty::{self, TyCtxt, List};
 use rustc::mir::{Operand, LocalDecl, Place, SourceInfo, BasicBlock, Local, BasicBlockData,
     TerminatorKind, Terminator, OUTERMOST_SOURCE_SCOPE, Constant, Mir};
@@ -142,13 +140,6 @@ fn should_annotate(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
             return false;
         }
     }
-
-    // FIXME: libcompiler_builtins does some odd linking gymnastics that I don't understand.
-    // compiler_builtins.93v8l1oj-cgu.1:(.text.__powisf2+0x2c):
-    // undefined reference to `core::yk_swt::yk_swt_rec_loc_wrap'
-    //if tcx.crate_name(LOCAL_CRATE) == "compiler_builtins" {
-    //    return false;
-    //}
 
     // We can't call the software tracing function if there is no libcore.
     if attr::contains_name(tcx.hir.krate_attrs(), "no_core") {
