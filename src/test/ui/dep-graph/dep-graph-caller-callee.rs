@@ -11,6 +11,7 @@
 // Test that immediate callers have to change when callee changes, but
 // not callers' callers.
 
+// ignore-test FIXME swt_ignore
 // compile-flags: -Z query-dep-graph
 
 #![feature(rustc_attrs)]

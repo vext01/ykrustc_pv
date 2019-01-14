@@ -13,6 +13,7 @@
 #![feature(lang_items)]
 #![no_std]
 #![no_main]
+#![no_trace]
 
 extern crate some_panic_impl;
 
