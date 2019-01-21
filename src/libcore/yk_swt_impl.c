@@ -56,12 +56,14 @@ yk_swt_start_tracing_impl() {
 }
 
 // Record a location into the trace buffer if tracing is enabled on the current thread.
-void
+// Returns `false` if the reentrant check fails. In this case the in-situ trace should
+// be considered invalid. If all is well, returns `true`.
+bool
 yk_swt_rec_loc_impl(uint64_t crate_hash, uint32_t def_idx, uint32_t bb_idx)
 {
     if (atomic_flag_test_and_set_explicit(&in_recorder,
         memory_order_acquire)) {
-        errx(EXIT_FAILURE, "thread re-entered trace recorder!");
+        return false;
     }
 
     // If tracing is not currently active, then we do nothing.
@@ -95,6 +97,7 @@ yk_swt_rec_loc_impl(uint64_t crate_hash, uint32_t def_idx, uint32_t bb_idx)
 
 done:
     atomic_flag_clear_explicit(&in_recorder, memory_order_release);
+    return true;
 }
 
 
