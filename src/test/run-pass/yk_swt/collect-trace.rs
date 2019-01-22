@@ -21,7 +21,7 @@ use test::black_box;
 pub fn main() {
     start_tracing();
     black_box(work());
-    let trace = stop_tracing();
+    let trace = stop_tracing().unwrap();
 
     let len = trace.len();
     // The default capacity of the trace buffer is 1024. We want to be sure we've tested the case

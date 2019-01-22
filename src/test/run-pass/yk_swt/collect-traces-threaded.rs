@@ -24,7 +24,7 @@ fn main() {
     let thr2 = thread::spawn(move || {
         start_tracing();
         let _ = work2();
-        let raw_trace2 = stop_tracing();
+        let raw_trace2 = stop_tracing().unwrap();
         let trace2 = trace_to_vec(&raw_trace2);
         unsafe { libc::free(raw_trace2.buf() as *mut libc::c_void) };
         trace2
@@ -32,7 +32,7 @@ fn main() {
 
     start_tracing();
     black_box(work1());
-    let raw_trace1 = stop_tracing();
+    let raw_trace1 = stop_tracing().unwrap();
     let trace1 = trace_to_vec(&raw_trace1);
     unsafe { libc::free(raw_trace1.buf() as *mut libc::c_void) };
 

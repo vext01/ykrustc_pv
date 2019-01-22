@@ -22,11 +22,11 @@ use test::black_box;
 pub fn main() {
     start_tracing();
     black_box(work1());
-    let trace1 = stop_tracing();
+    let trace1 = stop_tracing().unwrap();
 
     start_tracing();
     black_box(work2());
-    let trace2 = stop_tracing();
+    let trace2 = stop_tracing().unwrap();
 
     assert!(trace1.len() > trace2.len());
 

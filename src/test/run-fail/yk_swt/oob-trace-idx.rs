@@ -23,7 +23,7 @@ use test::black_box;
 pub fn main() {
     start_tracing();
     black_box(work());
-    let trace = stop_tracing();
+    let trace = stop_tracing().unwrap();
 
     // By reading one past the end of the trace buffer, we should cause the test to panic.
     trace.loc(trace.len());
