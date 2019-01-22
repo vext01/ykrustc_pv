@@ -101,7 +101,7 @@ yk_swt_rec_loc_impl(uint64_t crate_hash, uint32_t def_idx, uint32_t bb_idx)
     trace_buf_len ++;
 
 done:
-    atomic_flag_clear_explicit(&in_recorder, memory_order_seq_cst);
+    atomic_flag_clear_explicit(&in_recorder, memory_order_release);
 }
 
 

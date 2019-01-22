@@ -63,7 +63,7 @@ impl SWTrace {
 #[cfg(not(test))]
 fn yk_swt_rec_loc(crate_hash: u64, def_idx: u32, bb_idx: u32) {
     extern "C" { fn yk_swt_rec_loc_impl(crate_hash: u64, def_idx: u32, bb_idx: u32); }
-    unsafe { yk_swt_rec_loc_impl(crate_hash, def_idx, bb_idx) };
+    unsafe { yk_swt_rec_loc_impl(crate_hash, def_idx, bb_idx); }
 }
 
 /// Start software tracing on the current thread. The current thread must not already be tracing.
@@ -75,14 +75,15 @@ pub fn start_tracing() {
 
 /// Stop software tracing and return the trace. The current thread must already be tracing.
 #[cfg_attr(not(stage0), no_trace)]
-pub fn stop_tracing() -> SWTrace {
+pub fn stop_tracing() -> Option<SWTrace> {
     let len: usize = 0;
 
     extern "C" { fn yk_swt_stop_tracing_impl(ret_len: &usize) -> *mut MirLoc; }
     let buf = unsafe { yk_swt_stop_tracing_impl(&len) };
-    if buf.is_null() {
-        panic!("re-enetered the trace recorder!");
-    }
 
-    SWTrace { buf, len }
+    if buf.is_null() {
+        None
+    } else {
+        Some(SWTrace { buf, len })
+    }
 }
