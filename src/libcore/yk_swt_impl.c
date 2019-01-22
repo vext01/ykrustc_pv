@@ -23,6 +23,8 @@ struct mir_loc {
 #define TL_TRACE_REALLOC_CAP    1024
 
 // The trace buffer.
+// This is NULL when the current thread is not tracing, or when a trace has
+// been invalidated due to re-entrance. See below.
 static __thread struct mir_loc *trace_buf = NULL;
 // The number of elements in the trace buffer.
 static __thread size_t trace_buf_len = 0;
@@ -36,8 +38,6 @@ static __thread bool tracing = false;
 // Arguably the user is mad to do such a thing in a signal handler, but it's
 // best to detect this case, than to carry on with an invalid trace.
 static __thread volatile atomic_flag in_recorder = ATOMIC_FLAG_INIT;
-// This flag is set when we have detected the above case.
-static __thread bool reentered = false;
 
 // Start tracing on the current thread.
 // A new trace buffer is allocated and MIR locations are written into it. The
@@ -55,7 +55,6 @@ yk_swt_start_tracing_impl() {
 
     trace_buf_cap = TL_TRACE_INIT_CAP;
     tracing = true;
-    reentered = false;
 }
 
 // Record a location into the trace buffer if tracing is enabled on the current thread.
@@ -64,13 +63,15 @@ yk_swt_rec_loc_impl(uint64_t crate_hash, uint32_t def_idx, uint32_t bb_idx)
 {
     if (atomic_flag_test_and_set_explicit(&in_recorder,
         memory_order_acquire)) {
-        reentered = true;
+        // Invalidate the trace.
+        trace_buf = NULL;
+        trace_buf_len = 0;
         goto done;
     }
 
     // If tracing is not currently active, or we have detected reentrance, then
     // we do nothing.
-    if ((!tracing) || (reentered)) {
+    if ((!tracing) || (trace_buf == NULL)) {
         goto done;
     }
 
@@ -113,11 +114,6 @@ struct mir_loc *
 yk_swt_stop_tracing_impl(size_t *ret_trace_len) {
     if (!tracing) {
         errx(EXIT_FAILURE, "%s: thread not tracing", __func__);
-    }
-
-    if (reentered) {
-        *ret_trace_len = 0;
-        return NULL;
     }
 
     // We hand ownership of the trace to Rust now. Rust is responsible for
