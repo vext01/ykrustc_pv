@@ -64,6 +64,7 @@ yk_swt_rec_loc_impl(uint64_t crate_hash, uint32_t def_idx, uint32_t bb_idx)
     if (atomic_flag_test_and_set_explicit(&in_recorder,
         memory_order_acquire)) {
         // Invalidate the trace.
+        free(trace_buf);
         trace_buf = NULL;
         trace_buf_len = 0;
         goto done;
