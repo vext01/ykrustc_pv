@@ -73,7 +73,8 @@ pub fn start_tracing() {
     unsafe { yk_swt_start_tracing_impl(); }
 }
 
-/// Stop software tracing and return the trace. The current thread must already be tracing.
+/// Stop software tracing and return the trace, or `None` if the trace was invalidated.
+/// The current thread must already be tracing.
 #[cfg_attr(not(stage0), no_trace)]
 pub fn stop_tracing() -> Option<SWTrace> {
     let len: usize = 0;
