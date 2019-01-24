@@ -15,7 +15,8 @@ extern crate core;
 extern crate libc;
 extern crate test;
 
-use core::yk_swt::{start_tracing, stop_tracing, invalidate_trace};
+use std::yk_swt::{start_tracing, stop_tracing};
+use core::yk_swt::invalidate_trace;
 use test::black_box;
 
 // Check that invalidating a trace works.

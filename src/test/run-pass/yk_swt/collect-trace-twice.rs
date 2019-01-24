@@ -15,7 +15,7 @@ extern crate core;
 extern crate libc;
 extern crate test;
 
-use core::yk_swt::{start_tracing, stop_tracing};
+use std::yk_swt::{start_tracing, stop_tracing};
 use test::black_box;
 
 // Collect two traces sequentially in the same thread.
@@ -29,9 +29,6 @@ pub fn main() {
     let trace2 = stop_tracing().unwrap();
 
     assert!(trace1.len() > trace2.len());
-
-    unsafe { libc::free(trace1.buf() as *mut libc::c_void) };
-    unsafe { libc::free(trace2.buf() as *mut libc::c_void) };
 }
 
 #[inline(never)]

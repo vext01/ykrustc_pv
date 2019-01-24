@@ -15,7 +15,7 @@ extern crate core;
 extern crate libc;
 extern crate test;
 
-use core::yk_swt::{start_tracing, stop_tracing};
+use std::yk_swt::{start_tracing, stop_tracing};
 use test::black_box;
 
 pub fn main() {
@@ -31,8 +31,6 @@ pub fn main() {
     for idx in 0..len {
         trace.loc(idx); // All indices are in bounds, so should not panic.
     }
-
-    unsafe { libc::free(trace.buf() as *mut libc::c_void) };
 }
 
 #[inline(never)]

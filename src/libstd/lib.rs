@@ -463,6 +463,9 @@ pub mod process;
 pub mod sync;
 pub mod time;
 
+#[unstable(feature = "yk_swt", issue = "0")]
+pub mod yk_swt;
+
 #[unstable(feature = "futures_api",
            reason = "futures in libcore are unstable",
            issue = "50547")]

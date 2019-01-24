@@ -15,7 +15,7 @@ extern crate core;
 extern crate libc;
 extern crate test;
 
-use core::yk_swt::{start_tracing, stop_tracing, SWTrace};
+use std::yk_swt::{start_tracing, stop_tracing, SWTrace};
 use std::thread;
 use test::black_box;
 
@@ -26,7 +26,6 @@ fn main() {
         let _ = work2();
         let raw_trace2 = stop_tracing().unwrap();
         let trace2 = trace_to_vec(&raw_trace2);
-        unsafe { libc::free(raw_trace2.buf() as *mut libc::c_void) };
         trace2
     });
 
@@ -34,7 +33,6 @@ fn main() {
     black_box(work1());
     let raw_trace1 = stop_tracing().unwrap();
     let trace1 = trace_to_vec(&raw_trace1);
-    unsafe { libc::free(raw_trace1.buf() as *mut libc::c_void) };
 
     let trace2 = thr2.join().unwrap();
 
