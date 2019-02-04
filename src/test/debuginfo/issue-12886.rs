@@ -6,11 +6,12 @@
 
 // gdb-command:run
 // gdb-command:next
-// gdb-check:[...]25[...]s
+// gdb-check:[...]26[...]s
 // gdb-command:continue
 
 #![feature(omit_gdb_pretty_printer_section)]
 #![omit_gdb_pretty_printer_section]
+#![no_trace]
 
 // IF YOU MODIFY THIS FILE, BE CAREFUL TO ADAPT THE LINE NUMBERS IN THE DEBUGGER COMMANDS
 
