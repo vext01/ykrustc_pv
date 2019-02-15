@@ -42,7 +42,6 @@ use syntax_ext;
 
 use rustc_codegen_utils::link::out_filename;
 use rustc_yk_sections::mir_cfg::emit_mir_cfg_section;
-use rustc_yk_sections::with_yk_debug_sections;
 use rustc::util::nodemap::DefIdSet;
 use std::sync::Arc;
 use rustc::hir::def_id::LOCAL_CRATE;
@@ -329,9 +328,8 @@ pub fn compile_input(
                     }
                 }
 
-                // Output Yorick debug sections into binary targets.
-                if sess.crate_types.borrow().contains(&config::CrateType::Executable) &&
-                    with_yk_debug_sections() {
+                // Serialise the MIR into an ELF object for linkage later.
+                if sess.crate_types.borrow().contains(&config::CrateType::Executable) {
                     let out_fname = out_filename(
                         tcx.sess, config::CrateType::Executable, &outputs,
                         &*tcx.crate_name(LOCAL_CRATE).as_str());
