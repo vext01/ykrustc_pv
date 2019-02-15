@@ -7,9 +7,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-/// Custom CFG serialiser for Yorick.
-/// At the time of writing no crate using `proc_macro` can be used in-compiler, otherwise we'd have
-/// used Serde.
+// FIXME
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_imports)]
+#![allow(unused_mut)]
+
+
+/// CFG serialiser for Yorick.
+/// We use an external crate 'ykpack' to do this.
 
 use rustc::ty::TyCtxt;
 
@@ -21,35 +27,9 @@ use std::path::PathBuf;
 use std::fs::File;
 use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
-use byteorder::{NativeEndian, WriteBytesExt};
-
-// Edge kinds.
-const GOTO: u8 = 0;
-const SWITCHINT: u8 = 1;
-const RESUME: u8 = 2;
-const ABORT: u8 = 3;
-const RETURN: u8 = 4;
-const UNREACHABLE: u8 = 5;
-const DROP_NO_UNWIND: u8 = 6;
-const DROP_WITH_UNWIND: u8 = 7;
-const DROP_AND_REPLACE_NO_UNWIND: u8 = 8;
-const DROP_AND_REPLACE_WITH_UNWIND: u8 = 9;
-const CALL_NO_CLEANUP: u8 = 10;
-const CALL_WITH_CLEANUP: u8 = 11;
-const CALL_UNKNOWN_NO_CLEANUP: u8 = 12;
-const CALL_UNKNOWN_WITH_CLEANUP: u8 = 13;
-const ASSERT_NO_CLEANUP: u8 = 14;
-const ASSERT_WITH_CLEANUP: u8 = 15;
-const YIELD_NO_DROP: u8 = 16;
-const YIELD_WITH_DROP: u8 = 17;
-const GENERATOR_DROP: u8 = 18;
-const FALSE_EDGES: u8 = 19;
-const FALSE_UNWIND: u8 = 20;
-const NO_MIR: u8 = 254;
-const SENTINAL: u8 = 255;
+use ykpack;
 
 const MIR_CFG_SECTION_NAME: &'static str = ".yk_mir_cfg";
-const SECTION_VERSION: u16 = 0;
 
 /// Serialises the control flow for the given `DefId`s into a ELF object file and returns a handle
 /// for linking.
@@ -62,9 +42,7 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
     let mut mir_path: String = exe_filename.to_str().unwrap().to_owned();
     mir_path.push_str(".ykcfg");
     let mut fh = File::create(&mir_path).unwrap();
-
-    // Write a version field for sanity checking when deserialising.
-    fh.write_u16::<NativeEndian>(SECTION_VERSION).unwrap();
+    let mut enc = ykpack::Encoder::from(&mut fh);
 
     // To satisfy the reproducible build tests, the CFG must be written out in a deterministic
     // order, thus we sort the `DefId`s first.
@@ -73,18 +51,13 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
 
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
-            process_mir(&mut fh, tcx, def_id, tcx.optimized_mir(*def_id));
-        } else {
-            fh.write_u8(NO_MIR).unwrap();
-            fh.write_u64::<NativeEndian>(tcx.crate_hash(def_id.krate).as_u64()).unwrap();
-            fh.write_u32::<NativeEndian>(def_id.index.as_raw_u32()).unwrap();
+            let pack = process_mir(tcx, def_id, tcx.optimized_mir(*def_id));
+            // FIXME error handling.
+            enc.serialise(pack).unwrap();
         }
     }
 
-    // Write end-of-section sentinal.
-    fh.write_u8(SENTINAL).unwrap();
-
-    // Now graft it into an object file.
+    // Now graft the resulting blob file into an object file.
     let path = PathBuf::from(mir_path);
     let ret = YkExtraLinkObject::new(&path, MIR_CFG_SECTION_NAME);
     fs::remove_file(path).unwrap();
@@ -92,54 +65,35 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
     ret
 }
 
-/// For each block in the given MIR write out one CFG edge record.
-fn process_mir(fh: &mut File, tcx: &TyCtxt, def_id: &DefId, mir: &Mir) {
+/// Build a list of blocks to serialise for the given MIR.
+fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
+    let mut ser_blks = Vec::new();
+
     for (bb, maybe_bb_data) in mir.basic_blocks().iter_enumerated() {
         let bb_data = maybe_bb_data.terminator.as_ref().unwrap();
-        match bb_data.kind {
-            TerminatorKind::Goto{target: target_bb} => {
-                write_rec_header(fh, tcx, GOTO, def_id, bb);
-                fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
+        let ser_term = match bb_data.kind {
+            TerminatorKind::Goto{target: target_bb} =>
+                ykpack::Terminator::Goto{target_bb: u32::from(target_bb)},
+            TerminatorKind::SwitchInt{targets: ref target_bbs, ..} => {
+                let target_bbs = target_bbs.iter().map(|bb| u32::from(*bb)).collect();
+                ykpack::Terminator::SwitchInt{target_bbs}
             },
-            TerminatorKind::SwitchInt{ref targets, ..} => {
-                write_rec_header(fh, tcx, SWITCHINT, def_id, bb);
-
-                if cfg!(target_pointer_width = "64") {
-                    fh.write_u64::<NativeEndian>(targets.len() as u64).unwrap();
-                } else {
-                    panic!("unknown pointer width");
-                }
-
-                for target_bb in targets {
-                    fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
-                }
-            },
-            TerminatorKind::Resume => write_rec_header(fh, tcx, RESUME, def_id, bb),
-            TerminatorKind::Abort => write_rec_header(fh, tcx, ABORT, def_id, bb),
-            TerminatorKind::Return => write_rec_header(fh, tcx, RETURN, def_id, bb),
-            TerminatorKind::Unreachable => write_rec_header(fh, tcx, UNREACHABLE, def_id, bb),
-            TerminatorKind::Drop{target: target_bb, unwind: opt_unwind_bb, ..} => {
-                if let Some(unwind_bb) = opt_unwind_bb {
-                    write_rec_header(fh, tcx, DROP_WITH_UNWIND, def_id, bb);
-                    fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
-                    fh.write_u32::<NativeEndian>(unwind_bb.index() as u32).unwrap();
-                } else {
-                    write_rec_header(fh, tcx, DROP_NO_UNWIND, def_id, bb);
-                    fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
-                }
-            },
-            TerminatorKind::DropAndReplace{target: target_bb, unwind: opt_unwind_bb, ..} => {
-                if let Some(unwind_bb) = opt_unwind_bb {
-                    write_rec_header(fh, tcx, DROP_AND_REPLACE_WITH_UNWIND, def_id, bb);
-                    fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
-                    fh.write_u32::<NativeEndian>(unwind_bb.index() as u32).unwrap();
-                } else {
-                    write_rec_header(fh, tcx, DROP_AND_REPLACE_NO_UNWIND, def_id, bb);
-                    fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
-                }
-            },
-            TerminatorKind::Call{ref func, cleanup: opt_cleanup_bb, ..} => {
-                if let Operand::Constant(box Constant {
+            TerminatorKind::Resume => ykpack::Terminator::Resume,
+            TerminatorKind::Abort => ykpack::Terminator::Abort,
+            TerminatorKind::Return => ykpack::Terminator::Return,
+            TerminatorKind::Unreachable => ykpack::Terminator::Unreachable,
+            TerminatorKind::Drop{target: target_bb, unwind: unwind_bb, ..} =>
+                ykpack::Terminator::Drop{
+                    target_bb: u32::from(target_bb),
+                    unwind_bb: unwind_bb.map(|bb| u32::from(bb)),
+                },
+            TerminatorKind::DropAndReplace{target: target_bb, unwind: unwind_bb, ..} =>
+                ykpack::Terminator::DropAndReplace{
+                    target_bb: u32::from(target_bb),
+                    unwind_bb: unwind_bb.map(|bb| u32::from(bb)),
+                },
+            TerminatorKind::Call{ref func, cleanup: cleanup_bb, ..} => {
+                let ser_oper = if let Operand::Constant(box Constant {
                     literal: LazyConst::Evaluated(Const {
                         ty: &TyS {
                             sty: TyKind::FnDef(target_def_id, _substs), ..
@@ -147,68 +101,41 @@ fn process_mir(fh: &mut File, tcx: &TyCtxt, def_id: &DefId, mir: &Mir) {
                     }), ..
                 }, ..) = func {
                     // A statically known call target.
-                    if opt_cleanup_bb.is_some() {
-                        write_rec_header(fh, tcx, CALL_WITH_CLEANUP, def_id, bb);
-                    } else {
-                        write_rec_header(fh, tcx, CALL_NO_CLEANUP, def_id, bb);
-                    }
+                    let ser_target = ykpack::DefId::new(
+                        tcx.crate_hash(target_def_id.krate).as_u64(),
+                        target_def_id.index.as_raw_u32());
+                    ykpack::CallOperand::Fn(ser_target)
+                } else {
+                    // FIXME -- implement other callables.
+                    ykpack::CallOperand::Unknown
+                };
+                ykpack::Terminator::Call{
+                    operand: ser_oper,
+                    cleanup_bb: cleanup_bb.map(|bb| u32::from(bb)),
+                }
+            },
+            TerminatorKind::Assert{target: target_bb, cleanup: cleanup_bb, ..} =>
+                ykpack::Terminator::Assert{
+                    target_bb: u32::from(target_bb),
+                    cleanup_bb: cleanup_bb.map(|bb| u32::from(bb)),
+                },
+            TerminatorKind::Yield{resume: resume_bb, drop: drop_bb, ..} =>
+                ykpack::Terminator::Yield{
+                    resume_bb: u32::from(resume_bb),
+                    drop_bb: drop_bb.map(|bb| u32::from(bb)),
+                },
+            TerminatorKind::GeneratorDrop => ykpack::Terminator::GeneratorDrop,
+            TerminatorKind::FalseEdges{real_target: real_target_bb, ..} =>
+                ykpack::Terminator::FalseEdges{real_target_bb: u32::from(real_target_bb)},
+            TerminatorKind::FalseUnwind{real_target: real_target_bb, ..} =>
+                ykpack::Terminator::FalseUnwind{real_target_bb: u32::from(real_target_bb)},
+        };
 
-                    fh.write_u64::<NativeEndian>(tcx.crate_hash(
-                        target_def_id.krate).as_u64()).unwrap();
-                    fh.write_u32::<NativeEndian>(target_def_id.index.as_raw_u32()).unwrap();
-
-                    if let Some(cleanup_bb) = opt_cleanup_bb {
-                        fh.write_u32::<NativeEndian>(cleanup_bb.index() as u32).unwrap();
-                    }
-                } else {
-                    // It's a kind of call that we can't statically know the target of.
-                    if let Some(cleanup_bb) = opt_cleanup_bb {
-                        write_rec_header(fh, tcx, CALL_UNKNOWN_WITH_CLEANUP, def_id, bb);
-                        fh.write_u32::<NativeEndian>(cleanup_bb.index() as u32).unwrap();
-                    } else {
-                        write_rec_header(fh, tcx, CALL_UNKNOWN_NO_CLEANUP, def_id, bb);
-                    }
-                }
-            },
-            TerminatorKind::Assert{target: target_bb, cleanup: opt_cleanup_bb, ..} => {
-                if let Some(cleanup_bb) = opt_cleanup_bb {
-                    write_rec_header(fh, tcx, ASSERT_WITH_CLEANUP, def_id, bb);
-                    fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
-                    fh.write_u32::<NativeEndian>(cleanup_bb.index() as u32).unwrap();
-                } else {
-                    write_rec_header(fh, tcx, ASSERT_NO_CLEANUP, def_id, bb);
-                    fh.write_u32::<NativeEndian>(target_bb.index() as u32).unwrap();
-                }
-            },
-            TerminatorKind::Yield{resume: resume_bb, drop: opt_drop_bb, ..} => {
-                if let Some(drop_bb) = opt_drop_bb {
-                    write_rec_header(fh, tcx, YIELD_WITH_DROP, def_id, bb);
-                    fh.write_u32::<NativeEndian>(resume_bb.index() as u32).unwrap();
-                    fh.write_u32::<NativeEndian>(drop_bb.index() as u32).unwrap();
-                } else {
-                    write_rec_header(fh, tcx, YIELD_NO_DROP, def_id, bb);
-                    fh.write_u32::<NativeEndian>(resume_bb.index() as u32).unwrap();
-                }
-            },
-            TerminatorKind::GeneratorDrop => write_rec_header(fh, tcx, GENERATOR_DROP, def_id, bb),
-            TerminatorKind::FalseEdges{real_target: real_target_bb, ..} => {
-                // Fake edges not considered.
-                write_rec_header(fh, tcx, FALSE_EDGES, def_id, bb);
-                fh.write_u32::<NativeEndian>(real_target_bb.index() as u32).unwrap();
-            },
-            TerminatorKind::FalseUnwind{real_target: real_target_bb, ..} => {
-                // Fake edges not considered.
-                write_rec_header(fh, tcx, FALSE_UNWIND, def_id, bb);
-                fh.write_u32::<NativeEndian>(real_target_bb.index() as u32).unwrap();
-            },
-        }
+        // FIXME -- Serialise block statements.
+        ser_blks.push(ykpack::BasicBlock::new(Vec::new(), ser_term));
     }
-}
 
-/// Writes the "header" of a record, which is common to all record types.
-fn write_rec_header(fh: &mut File, tcx: &TyCtxt, kind: u8, def_id: &DefId, bb: BasicBlock) {
-    fh.write_u8(kind).unwrap();
-    fh.write_u64::<NativeEndian>(tcx.crate_hash(def_id.krate).as_u64()).unwrap();
-    fh.write_u32::<NativeEndian>(def_id.index.as_raw_u32()).unwrap();
-    fh.write_u32::<NativeEndian>(bb.index() as u32).unwrap();
+    let ser_def_id =
+        ykpack::DefId::new(tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
+    ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
 }

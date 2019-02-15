@@ -12,7 +12,7 @@
 extern crate rustc;
 extern crate rustc_yk_link;
 extern crate rustc_codegen_utils;
-extern crate byteorder;
+extern crate ykpack;
 
 use std::env;
 
