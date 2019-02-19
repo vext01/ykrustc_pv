@@ -13,7 +13,7 @@ use rustc::mir::{Operand, LocalDecl, Place, SourceInfo, BasicBlock, Local, Basic
 use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
 use syntax::attr;
-use transform::{MirPass, MirSource};
+use crate::transform::{MirPass, MirSource};
 use rustc::hir;
 use rustc::hir::def_id::{DefIndex, LOCAL_CRATE};
 use rustc::hir::map::blocks::FnLikeNode;
@@ -45,7 +45,7 @@ pub struct AddYkSWTCalls(pub DefIndex);
 impl MirPass for AddYkSWTCalls {
     fn run_pass<'a, 'tcx>(&self,
                           tcx: TyCtxt<'a, 'tcx, 'tcx>,
-                          src: MirSource,
+                          src: MirSource<'_>,
                           mir: &mut Mir<'tcx>) {
         if is_untraceable(tcx, src) {
             return;
@@ -139,7 +139,7 @@ impl MirPass for AddYkSWTCalls {
 
 /// Given a `MirSource`, decides if it is possible for us to trace (and thus whether we should
 /// transform) the MIR. Returns `true` if we cannot trace, otherwise `false`.
-fn is_untraceable(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource) -> bool {
+fn is_untraceable(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource<'_>) -> bool {
     // Never annotate anything annotated with the `#[no_trace]` attribute. This is used on tests
     // where our pass would interfere and on the trace recorder to prevent infinite
     // recursion.
