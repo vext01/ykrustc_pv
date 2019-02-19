@@ -6,7 +6,10 @@
 	url = https://github.com/rust-lang-nursery/nomicon.git
 [submodule "src/tools/cargo"]
 	path = src/tools/cargo
-	url = https://github.com/rust-lang/cargo.git
+    # FIXME: We are using a fork until this PR is merged
+    # https://github.com/rust-lang/cargo/pull/6547
+    #url = https://github.com/rust-lang/cargo.git
+    url = https://github.com/zoxc/cargo.git
 [submodule "src/doc/reference"]
 	path = src/doc/reference
 	url = https://github.com/rust-lang-nursery/reference.git
