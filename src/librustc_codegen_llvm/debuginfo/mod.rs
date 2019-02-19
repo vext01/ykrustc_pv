@@ -103,7 +103,7 @@ impl<'a, 'tcx> CrateDebugContext<'a, 'tcx> {
     }
 }
 
-/// Create any deferred debug metadata nodes
+/// Creates any deferred debug metadata nodes
 pub fn finalize(cx: &CodegenCx) {
     if cx.dbg_cx.is_none() {
         return;

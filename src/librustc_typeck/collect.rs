@@ -14,16 +14,15 @@
 //! At present, however, we do run collection across all items in the
 //! crate as a kind of pass. This should eventually be factored away.
 
-use astconv::{AstConv, Bounds};
-use constrained_type_params as ctp;
-use check::intrinsic::intrisic_operation_unsafety;
-use lint;
-use middle::lang_items::SizedTraitLangItem;
-use middle::resolve_lifetime as rl;
-use middle::weak_lang_items;
+use crate::astconv::{AstConv, Bounds};
+use crate::constrained_type_params as ctp;
+use crate::check::intrinsic::intrisic_operation_unsafety;
+use crate::lint;
+use crate::middle::lang_items::SizedTraitLangItem;
+use crate::middle::resolve_lifetime as rl;
+use crate::middle::weak_lang_items;
 use rustc::mir::mono::Linkage;
 use rustc::ty::query::Providers;
-use rustc::ty::query::queries;
 use rustc::ty::subst::Substs;
 use rustc::ty::util::Discr;
 use rustc::ty::util::IntTypeExt;
@@ -58,7 +57,7 @@ struct OnlySelfBounds(bool);
 
 pub fn collect_item_types<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     for &module in tcx.hir().krate().modules.keys() {
-        queries::collect_mod_item_types::ensure(tcx, tcx.hir().local_def_id(module));
+        tcx.ensure().collect_mod_item_types(tcx.hir().local_def_id(module));
     }
 }
 
@@ -69,7 +68,7 @@ fn collect_mod_item_types<'tcx>(tcx: TyCtxt<'_, 'tcx, 'tcx>, module_def_id: DefI
     );
 }
 
-pub fn provide(providers: &mut Providers) {
+pub fn provide(providers: &mut Providers<'_>) {
     *providers = Providers {
         type_of,
         generics_of,
@@ -93,7 +92,7 @@ pub fn provide(providers: &mut Providers) {
 ///////////////////////////////////////////////////////////////////////////
 
 /// Context specific to some particular item. This is what implements
-/// AstConv. It has information about the predicates that are defined
+/// `AstConv`. It has information about the predicates that are defined
 /// on the trait. Unfortunately, this predicate information is
 /// available in various different forms at various points in the
 /// process. So we can't just store a pointer to e.g., the AST or the
@@ -326,7 +325,7 @@ fn type_param_predicates<'a, 'tcx>(
 }
 
 impl<'a, 'tcx> ItemCtxt<'a, 'tcx> {
-    /// Find bounds from `hir::Generics`. This requires scanning through the
+    /// Finds bounds from `hir::Generics`. This requires scanning through the
     /// AST. We do this to avoid having to convert *all* the bounds, which
     /// would create artificial cycles. Instead we can only convert the
     /// bounds for a type parameter `X` if `X::Foo` is used.
@@ -372,7 +371,7 @@ impl<'a, 'tcx> ItemCtxt<'a, 'tcx> {
 }
 
 /// Tests whether this is the AST for a reference to the type
-/// parameter with id `param_id`. We use this so as to avoid running
+/// parameter with ID `param_id`. We use this so as to avoid running
 /// `ast_ty_to_ty`, because we want to avoid triggering an all-out
 /// conversion of the type to avoid inducing unnecessary cycles.
 fn is_param<'a, 'tcx>(
@@ -681,7 +680,7 @@ fn adt_def<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx ty::Ad
     tcx.alloc_adt_def(def_id, kind, variants, repr)
 }
 
-/// Ensures that the super-predicates of the trait with def-id
+/// Ensures that the super-predicates of the trait with `DefId`
 /// trait_def_id are converted and stored. This also ensures that
 /// the transitive super-predicates are converted;
 fn super_predicates_of<'a, 'tcx>(
@@ -738,8 +737,8 @@ fn super_predicates_of<'a, 'tcx>(
 }
 
 fn trait_def<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx ty::TraitDef {
-    let node_id = tcx.hir().as_local_node_id(def_id).unwrap();
-    let item = tcx.hir().expect_item(node_id);
+    let hir_id = tcx.hir().as_local_hir_id(def_id).unwrap();
+    let item = tcx.hir().expect_item_by_hir_id(hir_id);
 
     let (is_auto, unsafety) = match item.node {
         hir::ItemKind::Trait(is_auto, unsafety, ..) => (is_auto == hir::IsAuto::Yes, unsafety),
@@ -815,8 +814,7 @@ fn has_late_bound_regions<'a, 'tcx>(
                 return;
             }
 
-            let hir_id = self.tcx.hir().node_to_hir_id(lt.id);
-            match self.tcx.named_region(hir_id) {
+            match self.tcx.named_region(lt.hir_id) {
                 Some(rl::Region::Static) | Some(rl::Region::EarlyBound(..)) => {}
                 Some(rl::Region::LateBound(debruijn, _, _))
                 | Some(rl::Region::LateBoundAnon(debruijn, _)) if debruijn < self.outer_index => {}
@@ -842,8 +840,7 @@ fn has_late_bound_regions<'a, 'tcx>(
         };
         for param in &generics.params {
             if let GenericParamKind::Lifetime { .. } = param.kind {
-                let hir_id = tcx.hir().node_to_hir_id(param.id);
-                if tcx.is_late_bound(hir_id) {
+                if tcx.is_late_bound(param.hir_id) {
                     return Some(param.span);
                 }
             }
@@ -1256,7 +1253,7 @@ fn type_of<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> Ty<'tcx> {
         }) => {
             if gen.is_some() {
                 let hir_id = tcx.hir().node_to_hir_id(node_id);
-                return tcx.typeck_tables_of(def_id).node_id_to_type(hir_id);
+                return tcx.typeck_tables_of(def_id).node_type(hir_id);
             }
 
             let substs = ty::ClosureSubsts {
@@ -1456,11 +1453,11 @@ fn fn_sig<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> ty::PolyFnSig
             compute_sig_of_foreign_fn_decl(tcx, def_id, fn_decl, abi)
         }
 
-        StructCtor(&VariantData::Tuple(ref fields, _))
+        StructCtor(&VariantData::Tuple(ref fields, ..))
         | Variant(&Spanned {
             node:
                 hir::VariantKind {
-                    data: VariantData::Tuple(ref fields, _),
+                    data: VariantData::Tuple(ref fields, ..),
                     ..
                 },
             ..
@@ -1512,8 +1509,8 @@ fn impl_trait_ref<'a, 'tcx>(
 ) -> Option<ty::TraitRef<'tcx>> {
     let icx = ItemCtxt::new(tcx, def_id);
 
-    let node_id = tcx.hir().as_local_node_id(def_id).unwrap();
-    match tcx.hir().expect_item(node_id).node {
+    let hir_id = tcx.hir().as_local_hir_id(def_id).unwrap();
+    match tcx.hir().expect_item_by_hir_id(hir_id).node {
         hir::ItemKind::Impl(.., ref opt_trait_ref, _, _) => {
             opt_trait_ref.as_ref().map(|ast_trait_ref| {
                 let selfty = tcx.type_of(def_id);
@@ -1525,8 +1522,8 @@ fn impl_trait_ref<'a, 'tcx>(
 }
 
 fn impl_polarity<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> hir::ImplPolarity {
-    let node_id = tcx.hir().as_local_node_id(def_id).unwrap();
-    match tcx.hir().expect_item(node_id).node {
+    let hir_id = tcx.hir().as_local_hir_id(def_id).unwrap();
+    match tcx.hir().expect_item_by_hir_id(hir_id).node {
         hir::ItemKind::Impl(_, polarity, ..) => polarity,
         ref item => bug!("impl_polarity: {:?} not an impl", item),
     }
@@ -1584,7 +1581,7 @@ fn is_unsized<'gcx: 'tcx, 'tcx>(
 }
 
 /// Returns the early-bound lifetimes declared in this generics
-/// listing.  For anything other than fns/methods, this is just all
+/// listing. For anything other than fns/methods, this is just all
 /// the lifetimes that are declared. For fns or methods, we have to
 /// screen out those that do not appear in any where-clauses etc using
 /// `resolve_lifetime::early_bound_lifetimes`.
@@ -1604,6 +1601,9 @@ fn early_bound_lifetimes_from_generics<'a, 'tcx>(
         })
 }
 
+/// Returns a list of type predicates for the definition with ID `def_id`, including inferred
+/// lifetime constraints. This includes all predicates returned by `explicit_predicates_of`, plus
+/// inferred constraints concerning which regions outlive other regions.
 fn predicates_defined_on<'a, 'tcx>(
     tcx: TyCtxt<'a, 'tcx, 'tcx>,
     def_id: DefId,
@@ -1631,6 +1631,9 @@ fn predicates_defined_on<'a, 'tcx>(
     result
 }
 
+/// Returns a list of all type predicates (explicit and implicit) for the definition with
+/// ID `def_id`. This includes all predicates returned by `predicates_defined_on`, plus
+/// `Self: Trait` predicates for traits.
 fn predicates_of<'a, 'tcx>(
     tcx: TyCtxt<'a, 'tcx, 'tcx>,
     def_id: DefId,
@@ -1659,6 +1662,8 @@ fn predicates_of<'a, 'tcx>(
     result
 }
 
+/// Returns a list of user-specified type predicates for the definition with ID `def_id`.
+/// N.B., this does not include any implied/inferred constraints.
 fn explicit_predicates_of<'a, 'tcx>(
     tcx: TyCtxt<'a, 'tcx, 'tcx>,
     def_id: DefId,
@@ -2054,9 +2059,9 @@ pub fn compute_bounds<'gcx: 'tcx, 'tcx>(
 }
 
 /// Converts a specific `GenericBound` from the AST into a set of
-/// predicates that apply to the self-type. A vector is returned
-/// because this can be anywhere from zero predicates (`T : ?Sized` adds no
-/// predicates) to one (`T : Foo`) to many (`T : Bar<X=i32>` adds `T : Bar`
+/// predicates that apply to the self type. A vector is returned
+/// because this can be anywhere from zero predicates (`T: ?Sized` adds no
+/// predicates) to one (`T: Foo`) to many (`T: Bar<X=i32>` adds `T: Bar`
 /// and `<T as Bar>::X == i32`).
 fn predicates_from_bound<'tcx>(
     astconv: &dyn AstConv<'tcx, 'tcx>,

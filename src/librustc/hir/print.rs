@@ -11,9 +11,9 @@ use syntax::symbol::keywords;
 use syntax::util::parser::{self, AssocOp, Fixity};
 use syntax_pos::{self, BytePos, FileName};
 
-use hir;
-use hir::{PatKind, GenericBound, TraitBoundModifier, RangeEnd};
-use hir::{GenericParam, GenericParamKind, GenericArg};
+use crate::hir;
+use crate::hir::{PatKind, GenericBound, TraitBoundModifier, RangeEnd};
+use crate::hir::{GenericParam, GenericParamKind, GenericArg};
 
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -1768,7 +1768,7 @@ impl<'a> State<'a> {
         // is that it doesn't matter
         match pat.node {
             PatKind::Wild => self.s.word("_")?,
-            PatKind::Binding(binding_mode, _, ident, ref sub) => {
+            PatKind::Binding(binding_mode, _, _, ident, ref sub) => {
                 match binding_mode {
                     hir::BindingAnnotation::Ref => {
                         self.word_nbsp("ref")?;
@@ -2246,6 +2246,7 @@ impl<'a> State<'a> {
             params: hir::HirVec::new(),
             where_clause: hir::WhereClause {
                 id: ast::DUMMY_NODE_ID,
+                hir_id: hir::DUMMY_HIR_ID,
                 predicates: hir::HirVec::new(),
             },
             span: syntax_pos::DUMMY_SP,
@@ -2400,7 +2401,7 @@ fn stmt_ends_with_semi(stmt: &hir::StmtKind) -> bool {
 }
 
 fn bin_op_to_assoc_op(op: hir::BinOpKind) -> AssocOp {
-    use hir::BinOpKind::*;
+    use crate::hir::BinOpKind::*;
     match op {
         Add => AssocOp::Add,
         Sub => AssocOp::Subtract,

@@ -28,22 +28,10 @@ use syntax::ast;
 use syntax::ptr::P;
 use syntax_pos::{Span, DUMMY_SP, MultiSpan};
 
-struct OuterVisitor<'a, 'tcx: 'a> { tcx: TyCtxt<'a, 'tcx, 'tcx> }
-
-impl<'a, 'tcx> Visitor<'tcx> for OuterVisitor<'a, 'tcx> {
-    fn nested_visit_map<'this>(&'this mut self) -> NestedVisitorMap<'this, 'tcx> {
-        NestedVisitorMap::OnlyBodies(&self.tcx.hir())
-    }
-
-    fn visit_body(&mut self, body: &'tcx hir::Body) {
-        intravisit::walk_body(self, body);
-        let def_id = self.tcx.hir().body_owner_def_id(body.id());
-        let _ = self.tcx.check_match(def_id);
-    }
-}
-
 pub fn check_crate<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
-    tcx.hir().krate().visit_all_item_likes(&mut OuterVisitor { tcx }.as_deep_visitor());
+    for def_id in tcx.body_owners() {
+        tcx.ensure().check_match(def_id);
+    }
     tcx.sess.abort_if_errors();
 }
 
@@ -214,7 +202,7 @@ impl<'a, 'tcx> MatchVisitor<'a, 'tcx> {
 
             // Then, if the match has no arms, check whether the scrutinee
             // is uninhabited.
-            let pat_ty = self.tables.node_id_to_type(scrut.hir_id);
+            let pat_ty = self.tables.node_type(scrut.hir_id);
             let module = self.tcx.hir().get_module_parent(scrut.id);
             if inlined_arms.is_empty() {
                 let scrutinee_is_uninhabited = if self.tcx.features().exhaustive_patterns {
@@ -241,13 +229,13 @@ impl<'a, 'tcx> MatchVisitor<'a, 'tcx> {
                 return;
             }
 
-            let matrix: Matrix = inlined_arms
+            let matrix: Matrix<'_, '_> = inlined_arms
                 .iter()
                 .filter(|&&(_, guard)| guard.is_none())
                 .flat_map(|arm| &arm.0)
                 .map(|pat| smallvec![pat.0])
                 .collect();
-            let scrut_ty = self.tables.node_id_to_type(scrut.hir_id);
+            let scrut_ty = self.tables.node_type(scrut.hir_id);
             check_exhaustive(cx, scrut_ty, scrut.span, &matrix);
         })
     }
@@ -260,7 +248,7 @@ impl<'a, 'tcx> MatchVisitor<'a, 'tcx> {
                                                 self.tables);
             let pattern = patcx.lower_pattern(pat);
             let pattern_ty = pattern.ty;
-            let pats: Matrix = vec![smallvec![
+            let pats: Matrix<'_, '_> = vec![smallvec![
                 expand_pattern(cx, pattern)
             ]].into_iter().collect();
 
@@ -295,9 +283,9 @@ impl<'a, 'tcx> MatchVisitor<'a, 'tcx> {
     }
 }
 
-fn check_for_bindings_named_same_as_variants(cx: &MatchVisitor, pat: &Pat) {
+fn check_for_bindings_named_same_as_variants(cx: &MatchVisitor<'_, '_>, pat: &Pat) {
     pat.walk(|p| {
-        if let PatKind::Binding(_, _, ident, None) = p.node {
+        if let PatKind::Binding(_, _, _, ident, None) = p.node {
             if let Some(&bm) = cx.tables.pat_binding_modes().get(p.hir_id) {
                 if bm != ty::BindByValue(hir::MutImmutable) {
                     // Nothing to check.
@@ -474,7 +462,7 @@ fn check_exhaustive<'p, 'a: 'p, 'tcx: 'a>(cx: &mut MatchCheckCtxt<'a, 'tcx>,
 }
 
 // Legality of move bindings checking
-fn check_legality_of_move_bindings(cx: &MatchVisitor,
+fn check_legality_of_move_bindings(cx: &MatchVisitor<'_, '_>,
                                    has_guard: bool,
                                    pats: &[P<Pat>]) {
     let mut by_ref_span = None;
@@ -515,11 +503,11 @@ fn check_legality_of_move_bindings(cx: &MatchVisitor,
 
     for pat in pats {
         pat.walk(|p| {
-            if let PatKind::Binding(_, _, _, ref sub) = p.node {
+            if let PatKind::Binding(_, _, _, _, ref sub) = p.node {
                 if let Some(&bm) = cx.tables.pat_binding_modes().get(p.hir_id) {
                     match bm {
                         ty::BindByValue(..) => {
-                            let pat_ty = cx.tables.node_id_to_type(p.hir_id);
+                            let pat_ty = cx.tables.node_type(p.hir_id);
                             if !pat_ty.is_copy_modulo_regions(cx.tcx, cx.param_env, pat.span) {
                                 check_move(p, sub.as_ref().map(|p| &**p), span_vec);
                             }
@@ -549,11 +537,10 @@ fn check_legality_of_move_bindings(cx: &MatchVisitor,
     }
 }
 
-/// Ensures that a pattern guard doesn't borrow by mutable reference or
-/// assign.
-///
-/// FIXME: this should be done by borrowck.
-fn check_for_mutation_in_guard(cx: &MatchVisitor, guard: &hir::Guard) {
+/// Ensures that a pattern guard doesn't borrow by mutable reference or assign.
+//
+// FIXME: this should be done by borrowck.
+fn check_for_mutation_in_guard(cx: &MatchVisitor<'_, '_>, guard: &hir::Guard) {
     let mut checker = MutationChecker {
         cx,
     };
@@ -573,13 +560,13 @@ struct MutationChecker<'a, 'tcx: 'a> {
 }
 
 impl<'a, 'tcx> Delegate<'tcx> for MutationChecker<'a, 'tcx> {
-    fn matched_pat(&mut self, _: &Pat, _: &cmt_, _: euv::MatchMode) {}
-    fn consume(&mut self, _: ast::NodeId, _: Span, _: &cmt_, _: ConsumeMode) {}
-    fn consume_pat(&mut self, _: &Pat, _: &cmt_, _: ConsumeMode) {}
+    fn matched_pat(&mut self, _: &Pat, _: &cmt_<'_>, _: euv::MatchMode) {}
+    fn consume(&mut self, _: ast::NodeId, _: Span, _: &cmt_<'_>, _: ConsumeMode) {}
+    fn consume_pat(&mut self, _: &Pat, _: &cmt_<'_>, _: ConsumeMode) {}
     fn borrow(&mut self,
               _: ast::NodeId,
               span: Span,
-              _: &cmt_,
+              _: &cmt_<'_>,
               _: ty::Region<'tcx>,
               kind:ty:: BorrowKind,
               _: LoanCause) {
@@ -600,7 +587,7 @@ impl<'a, 'tcx> Delegate<'tcx> for MutationChecker<'a, 'tcx> {
         }
     }
     fn decl_without_init(&mut self, _: ast::NodeId, _: Span) {}
-    fn mutate(&mut self, _: ast::NodeId, span: Span, _: &cmt_, mode: MutateMode) {
+    fn mutate(&mut self, _: ast::NodeId, span: Span, _: &cmt_<'_>, mode: MutateMode) {
         match mode {
             MutateMode::JustWrite | MutateMode::WriteAndRead => {
                 struct_span_err!(self.cx.tcx.sess, span, E0302, "cannot assign in a pattern guard")
@@ -615,7 +602,7 @@ impl<'a, 'tcx> Delegate<'tcx> for MutationChecker<'a, 'tcx> {
 /// Forbids bindings in `@` patterns. This is necessary for memory safety,
 /// because of the way rvalues are handled in the borrow check. (See issue
 /// #14587.)
-fn check_legality_of_bindings_in_at_patterns(cx: &MatchVisitor, pat: &Pat) {
+fn check_legality_of_bindings_in_at_patterns(cx: &MatchVisitor<'_, '_>, pat: &Pat) {
     AtBindingPatternVisitor { cx: cx, bindings_allowed: true }.visit_pat(pat);
 }
 

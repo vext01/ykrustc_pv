@@ -33,7 +33,7 @@ pub use core::time::{SECOND, MILLISECOND, MICROSECOND, NANOSECOND};
 /// instant when created, and are often useful for tasks such as measuring
 /// benchmarks or timing how long an operation takes.
 ///
-/// Note, however, that instants are not guaranteed to be **steady**.  In other
+/// Note, however, that instants are not guaranteed to be **steady**. In other
 /// words, each tick of the underlying clock may not be the same length (e.g.
 /// some seconds may be longer than others). An instant may jump forwards or
 /// experience time dilation (slow down or speed up), but it will never go
@@ -245,17 +245,17 @@ impl Instant {
     /// Returns `Some(t)` where `t` is the time `self + duration` if `t` can be represented as
     /// `Instant` (which means it's inside the bounds of the underlying data structure), `None`
     /// otherwise.
-    #[unstable(feature = "time_checked_add", issue = "55940")]
+    #[stable(feature = "time_checked_add", since = "1.34.0")]
     pub fn checked_add(&self, duration: Duration) -> Option<Instant> {
-        self.0.checked_add_duration(&duration).map(|t| Instant(t))
+        self.0.checked_add_duration(&duration).map(Instant)
     }
 
     /// Returns `Some(t)` where `t` is the time `self - duration` if `t` can be represented as
     /// `Instant` (which means it's inside the bounds of the underlying data structure), `None`
     /// otherwise.
-    #[unstable(feature = "time_checked_add", issue = "55940")]
+    #[stable(feature = "time_checked_add", since = "1.34.0")]
     pub fn checked_sub(&self, duration: Duration) -> Option<Instant> {
-        self.0.checked_sub_duration(&duration).map(|t| Instant(t))
+        self.0.checked_sub_duration(&duration).map(Instant)
     }
 }
 
@@ -418,17 +418,17 @@ impl SystemTime {
     /// Returns `Some(t)` where `t` is the time `self + duration` if `t` can be represented as
     /// `SystemTime` (which means it's inside the bounds of the underlying data structure), `None`
     /// otherwise.
-    #[unstable(feature = "time_checked_add", issue = "55940")]
+    #[stable(feature = "time_checked_add", since = "1.34.0")]
     pub fn checked_add(&self, duration: Duration) -> Option<SystemTime> {
-        self.0.checked_add_duration(&duration).map(|t| SystemTime(t))
+        self.0.checked_add_duration(&duration).map(SystemTime)
     }
 
     /// Returns `Some(t)` where `t` is the time `self - duration` if `t` can be represented as
     /// `SystemTime` (which means it's inside the bounds of the underlying data structure), `None`
     /// otherwise.
-    #[unstable(feature = "time_checked_add", issue = "55940")]
+    #[stable(feature = "time_checked_add", since = "1.34.0")]
     pub fn checked_sub(&self, duration: Duration) -> Option<SystemTime> {
-        self.0.checked_sub_duration(&duration).map(|t| SystemTime(t))
+        self.0.checked_sub_duration(&duration).map(SystemTime)
     }
 }
 

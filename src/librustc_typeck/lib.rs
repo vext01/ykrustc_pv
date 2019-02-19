@@ -1,6 +1,6 @@
 /*!
 
-# typeck.rs
+# typeck
 
 The type checker is responsible for:
 
@@ -55,9 +55,7 @@ This API is completely unstable and subject to change.
 
 */
 
-#![doc(html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
-      html_favicon_url = "https://doc.rust-lang.org/favicon.ico",
-      html_root_url = "https://doc.rust-lang.org/nightly/")]
+#![doc(html_root_url = "https://doc.rust-lang.org/nightly/")]
 
 #![allow(non_camel_case_types)]
 
@@ -74,17 +72,15 @@ This API is completely unstable and subject to change.
 
 #![recursion_limit="256"]
 
+#![deny(rust_2018_idioms)]
+#![allow(explicit_outlives_requirements)]
+
+#![allow(elided_lifetimes_in_paths)] // WIP
+
 #[macro_use] extern crate log;
 #[macro_use] extern crate syntax;
-extern crate syntax_pos;
-
-extern crate arena;
 
 #[macro_use] extern crate rustc;
-extern crate rustc_data_structures;
-extern crate rustc_errors as errors;
-extern crate rustc_target;
-extern crate smallvec;
 
 // N.B., this module needs to be declared first so diagnostics are
 // registered before they are used.
@@ -143,7 +139,7 @@ fn check_type_alias_enum_variants_enabled<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 
     }
 }
 
-fn require_c_abi_if_variadic(tcx: TyCtxt,
+fn require_c_abi_if_variadic(tcx: TyCtxt<'_, '_, '_>,
                              decl: &hir::FnDecl,
                              abi: Abi,
                              span: Span) {
@@ -183,12 +179,12 @@ fn require_same_types<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
 }
 
 fn check_main_fn_ty<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, main_def_id: DefId) {
-    let main_id = tcx.hir().as_local_node_id(main_def_id).unwrap();
+    let main_id = tcx.hir().as_local_hir_id(main_def_id).unwrap();
     let main_span = tcx.def_span(main_def_id);
     let main_t = tcx.type_of(main_def_id);
     match main_t.sty {
         ty::FnDef(..) => {
-            if let Some(Node::Item(it)) = tcx.hir().find(main_id) {
+            if let Some(Node::Item(it)) = tcx.hir().find_by_hir_id(main_id) {
                 if let hir::ItemKind::Fn(.., ref generics, _) = it.node {
                     let mut error = false;
                     if !generics.params.is_empty() {
@@ -248,12 +244,12 @@ fn check_main_fn_ty<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, main_def_id: DefId) {
 }
 
 fn check_start_fn_ty<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, start_def_id: DefId) {
-    let start_id = tcx.hir().as_local_node_id(start_def_id).unwrap();
+    let start_id = tcx.hir().as_local_hir_id(start_def_id).unwrap();
     let start_span = tcx.def_span(start_def_id);
     let start_t = tcx.type_of(start_def_id);
     match start_t.sty {
         ty::FnDef(..) => {
-            if let Some(Node::Item(it)) = tcx.hir().find(start_id) {
+            if let Some(Node::Item(it)) = tcx.hir().find_by_hir_id(start_id) {
                 if let hir::ItemKind::Fn(.., ref generics, _) = it.node {
                     let mut error = false;
                     if !generics.params.is_empty() {
@@ -312,12 +308,13 @@ fn check_for_entry_fn<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     }
 }
 
-pub fn provide(providers: &mut Providers) {
+pub fn provide(providers: &mut Providers<'_>) {
     collect::provide(providers);
     coherence::provide(providers);
     check::provide(providers);
     variance::provide(providers);
     outlives::provide(providers);
+    impl_wf_check::provide(providers);
 }
 
 pub fn check_crate<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>)
@@ -333,10 +330,12 @@ pub fn check_crate<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>)
 
     })?;
 
-    tcx.sess.track_errors(|| {
-        time(tcx.sess, "outlives testing", ||
-            outlives::test::test_inferred_outlives(tcx));
-    })?;
+    if tcx.features().rustc_attrs {
+        tcx.sess.track_errors(|| {
+            time(tcx.sess, "outlives testing", ||
+                outlives::test::test_inferred_outlives(tcx));
+        })?;
+    }
 
     tcx.sess.track_errors(|| {
         time(tcx.sess, "impl wf inference", ||
@@ -348,10 +347,12 @@ pub fn check_crate<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>)
           coherence::check_coherence(tcx));
     })?;
 
-    tcx.sess.track_errors(|| {
-        time(tcx.sess, "variance testing", ||
-             variance::test::test_variance(tcx));
-    })?;
+    if tcx.features().rustc_attrs {
+        tcx.sess.track_errors(|| {
+            time(tcx.sess, "variance testing", ||
+                variance::test::test_variance(tcx));
+        })?;
+    }
 
     time(tcx.sess, "wf checking", || check::check_wf_new(tcx))?;
 

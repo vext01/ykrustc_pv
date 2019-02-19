@@ -5,10 +5,11 @@
 // done by the orphan and overlap modules. Then we build up various
 // mappings. That mapping code resides here.
 
-use hir::def_id::{DefId, LOCAL_CRATE};
+use crate::hir::def_id::{DefId, LOCAL_CRATE};
 use rustc::traits;
 use rustc::ty::{self, TyCtxt, TypeFoldable};
 use rustc::ty::query::Providers;
+use rustc::util::common::time;
 
 use syntax::ast;
 
@@ -132,23 +133,25 @@ fn coherent_trait<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) {
     for &impl_id in impls {
         check_impl_overlap(tcx, impl_id);
     }
-    builtin::check_trait(tcx, def_id);
+    use rustc::util::common::time;
+    time(tcx.sess, "builtin::check_trait checking", ||
+          builtin::check_trait(tcx, def_id));
 }
 
 pub fn check_coherence<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>) {
     for &trait_def_id in tcx.hir().krate().trait_impls.keys() {
-        ty::query::queries::coherent_trait::ensure(tcx, trait_def_id);
+        tcx.ensure().coherent_trait(trait_def_id);
     }
 
-    unsafety::check(tcx);
-    orphan::check(tcx);
+    time(tcx.sess, "unsafety checking", || unsafety::check(tcx));
+    time(tcx.sess, "orphan checking", || orphan::check(tcx));
 
     // these queries are executed for side-effects (error reporting):
-    ty::query::queries::crate_inherent_impls::ensure(tcx, LOCAL_CRATE);
-    ty::query::queries::crate_inherent_impls_overlap_check::ensure(tcx, LOCAL_CRATE);
+    tcx.ensure().crate_inherent_impls(LOCAL_CRATE);
+    tcx.ensure().crate_inherent_impls_overlap_check(LOCAL_CRATE);
 }
 
-/// Overlap: No two impls for the same trait are implemented for the
+/// Overlap: no two impls for the same trait are implemented for the
 /// same type. Likewise, no two inherent impls for a given type
 /// constructor provide a method with the same name.
 fn check_impl_overlap<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, node_id: ast::NodeId) {
