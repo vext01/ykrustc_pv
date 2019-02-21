@@ -7,20 +7,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// FIXME
-#![allow(dead_code)]
-#![allow(unused_variables)]
-#![allow(unused_imports)]
-#![allow(unused_mut)]
-
-
 /// CFG serialiser for Yorick.
 /// We use an external crate 'ykpack' to do this.
 
 use rustc::ty::TyCtxt;
 
 use rustc::hir::def_id::DefId;
-use rustc::mir::{Mir, TerminatorKind, Operand, Constant, BasicBlock};
+use rustc::mir::{Mir, TerminatorKind, Operand, Constant};
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
@@ -56,6 +49,7 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
             enc.serialise(pack).unwrap();
         }
     }
+    enc.done().unwrap();
 
     // Now graft the resulting blob file into an object file.
     let path = PathBuf::from(mir_path);
@@ -69,6 +63,7 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
 fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
     let mut ser_blks = Vec::new();
 
+    let mut expect_bb_idx = 0;
     for (bb, maybe_bb_data) in mir.basic_blocks().iter_enumerated() {
         let bb_data = maybe_bb_data.terminator.as_ref().unwrap();
         let ser_term = match bb_data.kind {
@@ -132,7 +127,9 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
         };
 
         // FIXME -- Serialise block statements.
+        assert_eq!(expect_bb_idx, bb.index(), "unexpected basic block index while serialising");
         ser_blks.push(ykpack::BasicBlock::new(Vec::new(), ser_term));
+        expect_bb_idx += 1;
     }
 
     let ser_def_id =

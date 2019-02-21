@@ -58,9 +58,9 @@ impl MirPass for AddYkSWTCalls {
         let u32_ty = tcx.types.u32;
         let u64_ty = tcx.types.u64;
 
-        let mut shadow_blks = Vec::new();
-        let mut user_blks = Vec::new(); // Copies of the blocks we started with.
-        let mut new_local_decls = Vec::new();
+        let mut shadow_blks: Vec<BasicBlockData<'_>> = Vec::new();
+        let mut user_blks: Vec<BasicBlockData<'_>> = Vec::new(); // Copies of the blocks we started with.
+        let mut new_local_decls: Vec<LocalDecl<'_>> = Vec::new();
 
         let num_orig_local_decls = mir.local_decls.len();
         let local_crate_hash = tcx.crate_hash(LOCAL_CRATE).as_u64();
@@ -76,8 +76,9 @@ impl MirPass for AddYkSWTCalls {
             let ret_place = Place::Local(Local::new(num_orig_local_decls + new_local_decls.len()));
             new_local_decls.push(ret_val);
 
-            let crate_hash_const = tcx.intern_lazy_const(
+            let crate_hash_const = tcx.mk_lazy_const(
                 ty::LazyConst::Evaluated(ty::Const::from_u64(tcx, local_crate_hash)));
+
             let crate_hash_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
                 ty: u64_ty,
@@ -85,7 +86,7 @@ impl MirPass for AddYkSWTCalls {
                 literal: crate_hash_const,
             });
 
-            let def_idx_const = tcx.intern_lazy_const(
+            let def_idx_const = tcx.mk_lazy_const(
                 ty::LazyConst::Evaluated(ty::Const::from_u32(tcx, self.0.as_raw_u32())));
             let def_idx_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
@@ -94,7 +95,7 @@ impl MirPass for AddYkSWTCalls {
                 literal: def_idx_const,
             });
 
-            let bb_const = tcx.intern_lazy_const(
+            let bb_const = tcx.mk_lazy_const(
                 ty::LazyConst::Evaluated(ty::Const::from_u32(tcx, bb.index() as u32)));
             let bb_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
@@ -147,7 +148,7 @@ fn is_untraceable(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource<'_>) -> bool {
     // "naked functions" can't be traced because their implementations manually implement
     // binary-level function epilogues and prologues, often using in-line assembler. We can't
     // automatically insert our calls into such code without breaking stuff.
-    for attr in tcx.get_attrs(src.def_id).iter() {
+    for attr in tcx.get_attrs(src.def_id()).iter() {
         if attr.check_name("no_trace") {
             return true;
         }
@@ -182,7 +183,7 @@ fn is_untraceable(tcx: TyCtxt<'a, 'tcx, 'tcx>, src: MirSource<'_>) -> bool {
     }
 
     // For the same reason as above, regular const functions can't be transformed.
-    let node_id = tcx.hir().as_local_node_id(src.def_id)
+    let node_id = tcx.hir().as_local_node_id(src.def_id())
         .expect("Failed to get node id");
     if let Some(fn_like) = FnLikeNode::from_node(tcx.hir().get(node_id)) {
         fn_like.constness() == hir::Constness::Const

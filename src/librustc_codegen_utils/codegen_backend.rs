@@ -133,12 +133,11 @@ impl CodegenBackend for MetadataOnlyCodegenBackend {
 
         crate::check_for_rustc_errors_attr(tcx);
         crate::symbol_names_test::report_symbol_names(tcx);
-        crate::rustc_incremental::assert_dep_graph(tcx);
-        crate::rustc_incremental::assert_module_sources::assert_module_sources(tcx);
+        rustc_incremental::assert_dep_graph(tcx);
+        rustc_incremental::assert_module_sources::assert_module_sources(tcx);
 
         let (monos, _inline_map) = collector::collect_crate_mono_items(
             tcx, collector::MonoItemCollectionMode::Eager);
-        crate::rustc_mir::monomorphize::assert_symbols_are_distinct(tcx, monos.iter());
 
         // FIXME: Fix this
         // rustc::middle::dependency_format::calculate(tcx);
