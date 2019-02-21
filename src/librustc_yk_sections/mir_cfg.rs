@@ -87,7 +87,7 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
                     target_bb: u32::from(target_bb),
                     unwind_bb: unwind_bb.map(|bb| u32::from(bb)),
                 },
-            TerminatorKind::Call{ref func, cleanup: cleanup_bb, ..} => {
+            TerminatorKind::Call{ref func, cleanup: cleanup_bb, ref destination, .. } => {
                 let ser_oper = if let Operand::Constant(box Constant {
                     literal: LazyConst::Evaluated(Const {
                         ty: &TyS {
@@ -104,9 +104,12 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
                     // FIXME -- implement other callables.
                     ykpack::CallOperand::Unknown
                 };
+
+                let ret_bb = destination.as_ref().map(|(_, bb)| u32::from(*bb));
                 ykpack::Terminator::Call{
                     operand: ser_oper,
                     cleanup_bb: cleanup_bb.map(|bb| u32::from(bb)),
+                    ret_bb: ret_bb,
                 }
             },
             TerminatorKind::Assert{target: target_bb, cleanup: cleanup_bb, ..} =>
