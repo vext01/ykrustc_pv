@@ -17,6 +17,8 @@ use crate::ty::{Region, RegionVid};
 use std::collections::BTreeMap;
 use std::{cmp, fmt, mem, u32};
 
+mod leak_check;
+
 #[derive(Default)]
 pub struct RegionConstraintCollector<'tcx> {
     /// For each `RegionVid`, the corresponding `RegionVariableOrigin`.
@@ -514,8 +516,8 @@ impl<'tcx> RegionConstraintCollector<'tcx> {
             self.undo_log.push(AddVar(vid));
         }
         debug!(
-            "created new region variable {:?} with origin {:?}",
-            vid, origin
+            "created new region variable {:?} in {:?} with origin {:?}",
+            vid, universe, origin
         );
         return vid;
     }
@@ -671,6 +673,7 @@ impl<'tcx> RegionConstraintCollector<'tcx> {
             self.make_subregion(origin, sup, sub);
 
             if let (ty::ReVar(sub), ty::ReVar(sup)) = (*sub, *sup) {
+                debug!("make_eqregion: uniying {:?} with {:?}", sub, sup);
                 self.unification_table.union(sub, sup);
                 self.any_unifications = true;
             }
@@ -823,7 +826,7 @@ impl<'tcx> RegionConstraintCollector<'tcx> {
         new_r
     }
 
-    fn universe(&self, region: Region<'tcx>) -> ty::UniverseIndex {
+    pub fn universe(&self, region: Region<'tcx>) -> ty::UniverseIndex {
         match *region {
             ty::ReScope(..)
             | ty::ReStatic

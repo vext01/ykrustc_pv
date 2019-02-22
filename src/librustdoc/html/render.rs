@@ -148,6 +148,8 @@ struct SharedContext {
     /// If false, the `select` element to have search filtering by crates on rendered docs
     /// won't be generated.
     pub generate_search_filter: bool,
+    /// Option disabled by default to generate files used by RLS and some other tools.
+    pub generate_redirect_pages: bool,
 }
 
 impl SharedContext {
@@ -516,6 +518,7 @@ pub fn run(mut krate: clean::Crate,
         resource_suffix,
         static_root_path,
         generate_search_filter,
+        generate_redirect_pages,
         ..
     } = options;
 
@@ -545,6 +548,7 @@ pub fn run(mut krate: clean::Crate,
         resource_suffix,
         static_root_path,
         generate_search_filter,
+        generate_redirect_pages,
     };
 
     // If user passed in `--playground-url` arg, we fill in crate name here
@@ -1746,7 +1750,8 @@ impl<'a> Cache {
         for param in &generics.params {
             match param.kind {
                 clean::GenericParamDefKind::Lifetime => {}
-                clean::GenericParamDefKind::Type { did, .. } => {
+                clean::GenericParamDefKind::Type { did, .. } |
+                clean::GenericParamDefKind::Const { did, .. } => {
                     self.typarams.insert(did, param.name.clone());
                 }
             }
@@ -2246,17 +2251,18 @@ impl Context {
                 if !self.render_redirect_pages {
                     all.append(full_path(self, &item), &item_type);
                 }
-                // Redirect from a sane URL using the namespace to Rustdoc's
-                // URL for the page.
-                let redir_name = format!("{}.{}.html", name, item_type.name_space());
-                let redir_dst = self.dst.join(redir_name);
-                if let Ok(redirect_out) = OpenOptions::new().create_new(true)
-                                                            .write(true)
-                                                            .open(&redir_dst) {
-                    let mut redirect_out = BufWriter::new(redirect_out);
-                    try_err!(layout::redirect(&mut redirect_out, file_name), &redir_dst);
+                if self.shared.generate_redirect_pages {
+                    // Redirect from a sane URL using the namespace to Rustdoc's
+                    // URL for the page.
+                    let redir_name = format!("{}.{}.html", name, item_type.name_space());
+                    let redir_dst = self.dst.join(redir_name);
+                    if let Ok(redirect_out) = OpenOptions::new().create_new(true)
+                                                                .write(true)
+                                                                .open(&redir_dst) {
+                        let mut redirect_out = BufWriter::new(redirect_out);
+                        try_err!(layout::redirect(&mut redirect_out, file_name), &redir_dst);
+                    }
                 }
-
                 // If the item is a macro, redirect from the old macro URL (with !)
                 // to the new one (without).
                 if item_type == ItemType::Macro {
@@ -2781,8 +2787,7 @@ fn item_module(w: &mut fmt::Formatter, cx: &Context,
                        <tr class='{stab}{add}module-item'>\
                            <td><a class=\"{class}\" href=\"{href}\" \
                                   title='{title}'>{name}</a>{unsafety_flag}</td>\
-                           <td class='docblock-short'>{stab_tags}{docs}\
-                           </td>\
+                           <td class='docblock-short'>{stab_tags}{docs}</td>\
                        </tr>",
                        name = *myitem.name.as_ref().unwrap(),
                        stab_tags = stability_tags(myitem),
@@ -2979,14 +2984,16 @@ fn item_static(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
 
 fn item_function(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
                  f: &clean::Function) -> fmt::Result {
-    let name_len = format!("{}{}{}{}{:#}fn {}{:#}",
-                           VisSpace(&it.visibility),
-                           ConstnessSpace(f.header.constness),
-                           UnsafetySpace(f.header.unsafety),
-                           AsyncSpace(f.header.asyncness),
-                           AbiSpace(f.header.abi),
-                           it.name.as_ref().unwrap(),
-                           f.generics).len();
+    let header_len = format!(
+        "{}{}{}{}{:#}fn {}{:#}",
+        VisSpace(&it.visibility),
+        ConstnessSpace(f.header.constness),
+        UnsafetySpace(f.header.unsafety),
+        AsyncSpace(f.header.asyncness),
+        AbiSpace(f.header.abi),
+        it.name.as_ref().unwrap(),
+        f.generics
+    ).len();
     write!(w, "{}<pre class='rust fn'>", render_spotlight_traits(it)?)?;
     render_attributes(w, it)?;
     write!(w,
@@ -3002,7 +3009,7 @@ fn item_function(w: &mut fmt::Formatter, cx: &Context, it: &clean::Item,
            where_clause = WhereClause { gens: &f.generics, indent: 0, end_newline: true },
            decl = Function {
               decl: &f.decl,
-              name_len,
+              header_len,
               indent: 0,
               asyncness: f.header.asyncness,
            })?;
@@ -3417,16 +3424,18 @@ fn render_assoc_item(w: &mut fmt::Formatter,
                 href(did).map(|p| format!("{}#{}.{}", p.0, ty, name)).unwrap_or(anchor)
             }
         };
-        let mut head_len = format!("{}{}{}{}{:#}fn {}{:#}",
-                                   VisSpace(&meth.visibility),
-                                   ConstnessSpace(header.constness),
-                                   UnsafetySpace(header.unsafety),
-                                   AsyncSpace(header.asyncness),
-                                   AbiSpace(header.abi),
-                                   name,
-                                   *g).len();
+        let mut header_len = format!(
+            "{}{}{}{}{:#}fn {}{:#}",
+            VisSpace(&meth.visibility),
+            ConstnessSpace(header.constness),
+            UnsafetySpace(header.unsafety),
+            AsyncSpace(header.asyncness),
+            AbiSpace(header.abi),
+            name,
+            *g
+        ).len();
         let (indent, end_newline) = if parent == ItemType::Trait {
-            head_len += 4;
+            header_len += 4;
             (4, false)
         } else {
             (0, true)
@@ -3444,7 +3453,7 @@ fn render_assoc_item(w: &mut fmt::Formatter,
                generics = *g,
                decl = Function {
                    decl: d,
-                   name_len: head_len,
+                   header_len,
                    indent,
                    asyncness: header.asyncness,
                },

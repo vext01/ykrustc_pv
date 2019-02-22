@@ -15,7 +15,7 @@ except ImportError:
 # List of people to ping when the status of a tool changed.
 MAINTAINERS = {
     'miri': '@oli-obk @RalfJung @eddyb',
-    'clippy-driver': '@Manishearth @llogiq @mcarton @oli-obk',
+    'clippy-driver': '@Manishearth @llogiq @mcarton @oli-obk @phansch',
     'rls': '@nrc @Xanewok',
     'rustfmt': '@nrc @topecongiro',
     'book': '@carols10cents @steveklabnik',
@@ -140,12 +140,12 @@ def update_latest(
                         tool, MAINTAINERS.get(tool),
                         relevant_pr_number, relevant_pr_user, pr_reviewer,
                     )
-                except IOError as (errno, strerror):
+                except IOError as e:
                     # network errors will simply end up not creating an issue, but that's better
                     # than failing the entire build job
-                    print "I/O error({0}): {1}".format(errno, strerror)
+                    print("I/O error: {0}".format(e))
                 except:
-                    print "Unexpected error:", sys.exc_info()[0]
+                    print("Unexpected error: {0}".format(sys.exc_info()[0]))
                     raise
 
             if changed:
@@ -171,7 +171,7 @@ if __name__ == '__main__':
 
     # assume that PR authors are also owners of the repo where the branch lives
     relevant_pr_match = re.search(
-        'Auto merge of #([0-9]+) - ([^:]+):[^,]+ r=([^\s]+)',
+        r'Auto merge of #([0-9]+) - ([^:]+):[^,]+, r=(\S+)',
         cur_commit_msg,
     )
     if relevant_pr_match:
@@ -182,10 +182,10 @@ if __name__ == '__main__':
         pr_reviewer = relevant_pr_match.group(3)
     else:
         number = '-1'
-        relevant_pr_user = '<unknown user>'
+        relevant_pr_user = 'ghost'
         relevant_pr_number = '<unknown PR>'
         relevant_pr_url = '<unknown>'
-        pr_reviewer = '<unknown reviewer>'
+        pr_reviewer = 'ghost'
 
     message = update_latest(
         cur_commit,

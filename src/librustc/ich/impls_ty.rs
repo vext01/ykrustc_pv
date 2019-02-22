@@ -206,6 +206,10 @@ impl<'gcx> HashStable<StableHashingContext<'gcx>> for ty::adjustment::AutoBorrow
     }
 }
 
+impl_stable_hash_for!(tuple_struct ty::util::NeedsDrop { value });
+
+impl_stable_hash_for!(tuple_struct ty::AdtSizedConstraint<'tcx> { list });
+
 impl_stable_hash_for!(struct ty::UpvarPath { hir_id });
 
 impl_stable_hash_for!(struct ty::UpvarId { var_path, closure_expr_id });
@@ -231,6 +235,11 @@ impl_stable_hash_for!(struct ty::FnSig<'tcx> {
     variadic,
     unsafety,
     abi
+});
+
+impl_stable_hash_for!(struct ty::ResolvedOpaqueTy<'tcx> {
+    concrete_type,
+    substs
 });
 
 impl<'a, 'gcx, T> HashStable<StableHashingContext<'a>> for ty::Binder<T>
