@@ -7,13 +7,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(unused_imports)]
+
 /// CFG serialiser for Yorick.
 /// We use an external crate 'ykpack' to do this.
 
 use rustc::ty::TyCtxt;
 
 use rustc::hir::def_id::DefId;
-use rustc::mir::{Mir, TerminatorKind, Operand, Constant};
+use rustc::mir::{Mir, TerminatorKind, Operand, Constant, StatementKind};
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
@@ -129,9 +131,22 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
                 ykpack::Terminator::FalseUnwind{real_target_bb: u32::from(real_target_bb)},
         };
 
+        // Serialise the blocks of the statement.
+        //let mut ser_stmts = Vec::new();
+        //for _stmt in bb_data.statements {
+            //match stmt {
+            //    StatementKind::StorageLive(local) =>
+            //        ser_stmts.push(ykpack::Statement::StorageLive(0)), //u32::from(local))),
+            //    _ => (),
+            //}
+        //}
+
+        let _s = &bb_data.statements;
+
         // FIXME -- Serialise block statements.
         assert_eq!(expect_bb_idx, bb.index(), "unexpected basic block index while serialising");
         ser_blks.push(ykpack::BasicBlock::new(Vec::new(), ser_term));
+        //ser_blks.push(ykpack::BasicBlock::new(ser_stmts, ser_term));
         expect_bb_idx += 1;
     }
 
