@@ -66,9 +66,9 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
     let mut ser_blks = Vec::new();
 
     let mut expect_bb_idx = 0;
-    for (bb, maybe_bb_data) in mir.basic_blocks().iter_enumerated() {
-        let bb_data = maybe_bb_data.terminator.as_ref().unwrap();
-        let ser_term = match bb_data.kind {
+    for (bb, bb_data) in mir.basic_blocks().iter_enumerated() {
+        let term = bb_data.terminator.as_ref().unwrap();
+        let ser_term = match term.kind {
             TerminatorKind::Goto{target: target_bb} =>
                 ykpack::Terminator::Goto{target_bb: u32::from(target_bb)},
             TerminatorKind::SwitchInt{targets: ref target_bbs, ..} => {
@@ -98,10 +98,7 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
                     }), ..
                 }, ..) = func {
                     // A statically known call target.
-                    let ser_target = ykpack::DefId::new(
-                        tcx.crate_hash(target_def_id.krate).as_u64(),
-                        target_def_id.index.as_raw_u32());
-                    ykpack::CallOperand::Fn(ser_target)
+                    ykpack::CallOperand::Fn((tcx, &target_def_id).to_pack())
                 } else {
                     // FIXME -- implement other callables.
                     ykpack::CallOperand::Unknown
@@ -131,26 +128,26 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
                 ykpack::Terminator::FalseUnwind{real_target_bb: u32::from(real_target_bb)},
         };
 
-        // Serialise the blocks of the statement.
-        //let mut ser_stmts = Vec::new();
-        //for _stmt in bb_data.statements {
-            //match stmt {
-            //    StatementKind::StorageLive(local) =>
-            //        ser_stmts.push(ykpack::Statement::StorageLive(0)), //u32::from(local))),
-            //    _ => (),
-            //}
-        //}
-
-        let _s = &bb_data.statements;
-
-        // FIXME -- Serialise block statements.
         assert_eq!(expect_bb_idx, bb.index(), "unexpected basic block index while serialising");
-        ser_blks.push(ykpack::BasicBlock::new(Vec::new(), ser_term));
-        //ser_blks.push(ykpack::BasicBlock::new(ser_stmts, ser_term));
         expect_bb_idx += 1;
+        // FIXME -- statements.
+        ser_blks.push(ykpack::BasicBlock::new(Vec::new(), ser_term));
     }
 
     let ser_def_id =
         ykpack::DefId::new(tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
     ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
+}
+
+trait ToPack<T> {
+    fn to_pack(&self) -> T;
+}
+
+impl<'a, 'tcx> ToPack<ykpack::DefId> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId) {
+    fn to_pack(&self) -> ykpack::DefId {
+        ykpack::DefId {
+            crate_hash: self.0.crate_hash(self.1.krate).as_u64(),
+            def_idx: self.1.index.as_raw_u32(),
+        }
+    }
 }
