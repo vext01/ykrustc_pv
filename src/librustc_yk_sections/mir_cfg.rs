@@ -9,8 +9,12 @@
 
 #![allow(unused_imports)]
 
-/// CFG serialiser for Yorick.
-/// We use an external crate 'ykpack' to do this.
+//! MIR to Yorick bytecode converter/serialiser.
+//!
+//! We convert the compile-time MIR information into our own custom bytecode and stash it away in
+//! an ELF section so that the JIT runtime can find it, and use it for trace generation later.
+//!
+//! Serialisation itself is performed by an external library: ykpack.
 
 use rustc::ty::TyCtxt;
 
@@ -26,7 +30,7 @@ use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
 use ykpack;
 
-const MIR_CFG_SECTION_NAME: &'static str = ".yk_mir_cfg";
+const MIR_CFG_SECTION_NAME: &'static str = ".yk_bytecode";
 
 /// Serialises the control flow for the given `DefId`s into a ELF object file and returns a handle
 /// for linking.
@@ -63,6 +67,7 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
     ret
 }
 
+/// The trait for converting MIR data structures into a bytecode packs.
 trait ToPack<T> {
     fn to_pack(&self) -> T;
 }
