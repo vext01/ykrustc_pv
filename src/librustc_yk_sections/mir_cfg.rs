@@ -15,7 +15,7 @@
 use rustc::ty::TyCtxt;
 
 use rustc::hir::def_id::DefId;
-use rustc::mir::{Mir, TerminatorKind, Operand, Constant, StatementKind};
+use rustc::mir::{Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData};
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
@@ -64,9 +64,33 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
 /// Build a list of blocks to serialise for the given MIR.
 fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
     let mut ser_blks = Vec::new();
+    for bb_data in mir.basic_blocks() {
+        ser_blks.push((tcx, bb_data).to_pack());
+    }
 
-    let mut expect_bb_idx = 0;
-    for (bb, bb_data) in mir.basic_blocks().iter_enumerated() {
+    let ser_def_id = ykpack::DefId::new(
+        tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
+
+    ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
+}
+
+trait ToPack<T> {
+    fn to_pack(&self) -> T;
+}
+
+impl<'a, 'tcx> ToPack<ykpack::DefId> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId) {
+    fn to_pack(&self) -> ykpack::DefId {
+        ykpack::DefId {
+            crate_hash: self.0.crate_hash(self.1.krate).as_u64(),
+            def_idx: self.1.index.as_raw_u32(),
+        }
+    }
+}
+
+impl<'a, 'tcx> ToPack<ykpack::BasicBlock> for (&'a TyCtxt<'a, 'tcx, '_>, &BasicBlockData<'_>) {
+    fn to_pack(&self) -> ykpack::BasicBlock {
+        let (tcx, bb_data) = self;
+
         let term = bb_data.terminator.as_ref().unwrap();
         let ser_term = match term.kind {
             TerminatorKind::Goto{target: target_bb} =>
@@ -98,7 +122,7 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
                     }), ..
                 }, ..) = func {
                     // A statically known call target.
-                    ykpack::CallOperand::Fn((tcx, &target_def_id).to_pack())
+                    ykpack::CallOperand::Fn((*tcx, &target_def_id).to_pack())
                 } else {
                     // FIXME -- implement other callables.
                     ykpack::CallOperand::Unknown
@@ -128,26 +152,7 @@ fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
                 ykpack::Terminator::FalseUnwind{real_target_bb: u32::from(real_target_bb)},
         };
 
-        assert_eq!(expect_bb_idx, bb.index(), "unexpected basic block index while serialising");
-        expect_bb_idx += 1;
-        // FIXME -- statements.
-        ser_blks.push(ykpack::BasicBlock::new(Vec::new(), ser_term));
-    }
-
-    let ser_def_id =
-        ykpack::DefId::new(tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
-    ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
-}
-
-trait ToPack<T> {
-    fn to_pack(&self) -> T;
-}
-
-impl<'a, 'tcx> ToPack<ykpack::DefId> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId) {
-    fn to_pack(&self) -> ykpack::DefId {
-        ykpack::DefId {
-            crate_hash: self.0.crate_hash(self.1.krate).as_u64(),
-            def_idx: self.1.index.as_raw_u32(),
-        }
+        // FIXME. Implement block contents (currently an empty vector).
+        ykpack::BasicBlock::new(Vec::new(), ser_term)
     }
 }
