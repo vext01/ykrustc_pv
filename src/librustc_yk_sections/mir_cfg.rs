@@ -67,7 +67,7 @@ trait ToPack<T> {
     fn to_pack(&self) -> T;
 }
 
-impl<'a, 'tcx> ToPack<ykpack::Pack> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId, &Mir<'tcx>) {
+impl<'tcx> ToPack<ykpack::Pack> for (&TyCtxt<'_, 'tcx, '_>, &DefId, &Mir<'tcx>) {
     fn to_pack(&self) -> ykpack::Pack {
         let (tcx, def_id, mir) = self;
 
@@ -83,7 +83,7 @@ impl<'a, 'tcx> ToPack<ykpack::Pack> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId, &Mir<
     }
 }
 
-impl<'a, 'tcx> ToPack<ykpack::DefId> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId) {
+impl ToPack<ykpack::DefId> for (&TyCtxt<'_, '_, '_>, &DefId) {
     fn to_pack(&self) -> ykpack::DefId {
         ykpack::DefId {
             crate_hash: self.0.crate_hash(self.1.krate).as_u64(),
@@ -92,7 +92,7 @@ impl<'a, 'tcx> ToPack<ykpack::DefId> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId) {
     }
 }
 
-impl<'a, 'tcx> ToPack<ykpack::Terminator> for (&'a TyCtxt<'a, 'tcx, '_>, &Terminator<'tcx>) {
+impl<'tcx> ToPack<ykpack::Terminator> for (&TyCtxt<'_, 'tcx, '_>, &Terminator<'tcx>) {
     fn to_pack(&self) -> ykpack::Terminator {
         let (tcx, term) = self;
 
@@ -158,7 +158,7 @@ impl<'a, 'tcx> ToPack<ykpack::Terminator> for (&'a TyCtxt<'a, 'tcx, '_>, &Termin
     }
 }
 
-impl<'a, 'tcx> ToPack<ykpack::BasicBlock> for (&'a TyCtxt<'a, 'tcx, '_>, &BasicBlockData<'tcx>) {
+impl<'tcx> ToPack<ykpack::BasicBlock> for (&TyCtxt<'_, 'tcx, '_>, &BasicBlockData<'tcx>) {
     fn to_pack(&self) -> ykpack::BasicBlock {
         let (tcx, bb_data) = self;
 
