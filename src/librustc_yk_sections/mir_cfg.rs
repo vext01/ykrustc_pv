@@ -48,7 +48,7 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
 
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
-            let pack = process_mir(tcx, def_id, tcx.optimized_mir(*def_id));
+            let pack = (tcx, def_id, tcx.optimized_mir(*def_id)).to_pack();
             // FIXME error handling.
             enc.serialise(pack).unwrap();
         }
@@ -63,21 +63,24 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
     ret
 }
 
-/// Build a list of blocks to serialise for the given MIR.
-fn process_mir<'tcx>(tcx: &TyCtxt<'_, 'tcx, '_>, def_id: &DefId, mir: &Mir<'tcx>) -> ykpack::Pack {
-    let mut ser_blks = Vec::new();
-    for bb_data in mir.basic_blocks() {
-        ser_blks.push((tcx, bb_data).to_pack());
-    }
-
-    let ser_def_id = ykpack::DefId::new(
-        tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
-
-    ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
-}
-
 trait ToPack<T> {
     fn to_pack(&self) -> T;
+}
+
+impl<'a, 'tcx> ToPack<ykpack::Pack> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId, &Mir<'tcx>) {
+    fn to_pack(&self) -> ykpack::Pack {
+        let (tcx, def_id, mir) = self;
+
+        let mut ser_blks = Vec::new();
+        for bb_data in mir.basic_blocks() {
+            ser_blks.push((*tcx, bb_data).to_pack());
+        }
+
+        let ser_def_id = ykpack::DefId::new(
+            tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
+
+        ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
+    }
 }
 
 impl<'a, 'tcx> ToPack<ykpack::DefId> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId) {
