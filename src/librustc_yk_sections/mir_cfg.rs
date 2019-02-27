@@ -31,16 +31,14 @@ use std::fs;
 use std::error::Error;
 use ykpack;
 
-const MIR_CFG_SECTION_NAME: &'static str = ".yk_bytecode";
+const SECTION_NAME: &'static str = ".yk_bytecode";
 
-/// Serialises the control flow for the given `DefId`s into a ELF object file and returns a handle
-/// for linking.
-pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
+/// Converts and serialises the specified DefIds, returning an linkable ELF object.
+pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, exe_filename: PathBuf)
     -> Result<YkExtraLinkObject, Box<dyn Error>> {
 
-    // Serialise the MIR into a file whose name is derived from the output binary. The filename
-    // must be the same between builds of the same binary for the reproducible build tests to pass.
+    // The filename must be the same between builds for the reproducible build tests to pass.
     let mut mir_path: String = exe_filename.to_str().unwrap().to_owned();
     mir_path.push_str(".ykcfg");
     let mut fh = File::create(&mir_path)?;
@@ -61,7 +59,7 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
 
     // Now graft the resulting blob file into an object file.
     let path = PathBuf::from(mir_path);
-    let ret = YkExtraLinkObject::new(&path, MIR_CFG_SECTION_NAME);
+    let ret = YkExtraLinkObject::new(&path, SECTION_NAME);
     fs::remove_file(path)?;
 
     Ok(ret)
