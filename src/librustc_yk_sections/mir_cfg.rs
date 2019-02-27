@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::fs::File;
 use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
+use std::error::Error;
 use ykpack;
 
 const MIR_CFG_SECTION_NAME: &'static str = ".yk_bytecode";
@@ -36,13 +37,13 @@ const MIR_CFG_SECTION_NAME: &'static str = ".yk_bytecode";
 /// for linking.
 pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, exe_filename: PathBuf)
-    -> YkExtraLinkObject {
+    -> Result<YkExtraLinkObject, Box<dyn Error>> {
 
     // Serialise the MIR into a file whose name is derived from the output binary. The filename
     // must be the same between builds of the same binary for the reproducible build tests to pass.
     let mut mir_path: String = exe_filename.to_str().unwrap().to_owned();
     mir_path.push_str(".ykcfg");
-    let mut fh = File::create(&mir_path).unwrap();
+    let mut fh = File::create(&mir_path)?;
     let mut enc = ykpack::Encoder::from(&mut fh);
 
     // To satisfy the reproducible build tests, the CFG must be written out in a deterministic
@@ -53,18 +54,17 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
             let pack = (tcx, def_id, tcx.optimized_mir(*def_id)).to_pack();
-            // FIXME error handling.
-            enc.serialise(pack).unwrap();
+            enc.serialise(pack)?;
         }
     }
-    enc.done().unwrap();
+    enc.done()?;
 
     // Now graft the resulting blob file into an object file.
     let path = PathBuf::from(mir_path);
     let ret = YkExtraLinkObject::new(&path, MIR_CFG_SECTION_NAME);
-    fs::remove_file(path).unwrap();
+    fs::remove_file(path)?;
 
-    ret
+    Ok(ret)
 }
 
 /// The trait for converting MIR data structures into a bytecode packs.

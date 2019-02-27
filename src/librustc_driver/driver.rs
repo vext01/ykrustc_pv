@@ -333,14 +333,19 @@ pub fn compile_input(
                     }
                 }
 
-                // Serialise the MIR into an ELF object for linkage later.
+                // Convert the MIR into Yorick bytecode.
                 if sess.crate_types.borrow().contains(&config::CrateType::Executable) {
                     let out_fname = out_filename(
                         tcx.sess, config::CrateType::Executable, &outputs,
                         &*tcx.crate_name(LOCAL_CRATE).as_str());
 
-                    tcx.sess.yk_link_objects.borrow_mut()
-                       .push(emit_mir_cfg_section(&tcx, &def_ids, out_fname));
+                    match emit_mir_cfg_section(&tcx, &def_ids, out_fname) {
+                        Ok(link_obj) => tcx.sess.yk_link_objects.borrow_mut().push(link_obj),
+                        Err(e) => {
+                            sess.err(&format!("could not make Yorick bytecode: {}", e));
+                            sess.abort_if_errors();
+                        }
+                    }
                 }
 
                 if tcx.sess.opts.debugging_opts.query_stats {
