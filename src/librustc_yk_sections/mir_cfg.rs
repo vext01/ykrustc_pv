@@ -15,7 +15,9 @@
 use rustc::ty::TyCtxt;
 
 use rustc::hir::def_id::DefId;
-use rustc::mir::{Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData};
+use rustc::mir::{
+    Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator
+};
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
@@ -62,7 +64,7 @@ pub fn emit_mir_cfg_section<'a, 'tcx, 'gcx>(
 }
 
 /// Build a list of blocks to serialise for the given MIR.
-fn process_mir(tcx: &TyCtxt, def_id: &DefId, mir: &Mir) -> ykpack::Pack {
+fn process_mir<'tcx>(tcx: &TyCtxt<'_, 'tcx, '_>, def_id: &DefId, mir: &Mir<'tcx>) -> ykpack::Pack {
     let mut ser_blks = Vec::new();
     for bb_data in mir.basic_blocks() {
         ser_blks.push((tcx, bb_data).to_pack());
@@ -87,12 +89,11 @@ impl<'a, 'tcx> ToPack<ykpack::DefId> for (&'a TyCtxt<'a, 'tcx, '_>, &DefId) {
     }
 }
 
-impl<'a, 'tcx> ToPack<ykpack::BasicBlock> for (&'a TyCtxt<'a, 'tcx, '_>, &BasicBlockData<'_>) {
-    fn to_pack(&self) -> ykpack::BasicBlock {
-        let (tcx, bb_data) = self;
+impl<'a, 'tcx> ToPack<ykpack::Terminator> for (&'a TyCtxt<'a, 'tcx, '_>, &Terminator<'tcx>) {
+    fn to_pack(&self) -> ykpack::Terminator {
+        let (tcx, term) = self;
 
-        let term = bb_data.terminator.as_ref().unwrap();
-        let ser_term = match term.kind {
+        match term.kind {
             TerminatorKind::Goto{target: target_bb} =>
                 ykpack::Terminator::Goto{target_bb: u32::from(target_bb)},
             TerminatorKind::SwitchInt{targets: ref target_bbs, ..} => {
@@ -150,9 +151,16 @@ impl<'a, 'tcx> ToPack<ykpack::BasicBlock> for (&'a TyCtxt<'a, 'tcx, '_>, &BasicB
                 ykpack::Terminator::FalseEdges{real_target_bb: u32::from(real_target_bb)},
             TerminatorKind::FalseUnwind{real_target: real_target_bb, ..} =>
                 ykpack::Terminator::FalseUnwind{real_target_bb: u32::from(real_target_bb)},
-        };
+        }
+    }
+}
+
+impl<'a, 'tcx> ToPack<ykpack::BasicBlock> for (&'a TyCtxt<'a, 'tcx, '_>, &BasicBlockData<'tcx>) {
+    fn to_pack(&self) -> ykpack::BasicBlock {
+        let (tcx, bb_data) = self;
 
         // FIXME. Implement block contents (currently an empty vector).
-        ykpack::BasicBlock::new(Vec::new(), ser_term)
+        // Unwrap here can't fail, as MIR terminators can only be None during construction.
+        ykpack::BasicBlock::new(Vec::new(), (*tcx, bb_data.terminator.as_ref().unwrap()).to_pack())
     }
 }
