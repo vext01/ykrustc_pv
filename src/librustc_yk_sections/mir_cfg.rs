@@ -100,7 +100,9 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&TyCtxt<'_, 'tcx, '_>, &Terminator<'t
         let (tcx, term) = self;
 
         match term.kind {
-            TerminatorKind::Goto{target: target_bb} =>
+            TerminatorKind::Goto{target: target_bb}
+            | TerminatorKind::FalseEdges{real_target: target_bb, ..}
+            | TerminatorKind::FalseUnwind{real_target: target_bb, ..} =>
                 ykpack::Terminator::Goto{target_bb: u32::from(target_bb)},
             TerminatorKind::SwitchInt{targets: ref target_bbs, ..} => {
                 let target_bbs = target_bbs.iter().map(|bb| u32::from(*bb)).collect();
@@ -153,10 +155,6 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&TyCtxt<'_, 'tcx, '_>, &Terminator<'t
                     drop_bb: drop_bb.map(|bb| u32::from(bb)),
                 },
             TerminatorKind::GeneratorDrop => ykpack::Terminator::GeneratorDrop,
-            TerminatorKind::FalseEdges{real_target: real_target_bb, ..} =>
-                ykpack::Terminator::FalseEdges{real_target_bb: u32::from(real_target_bb)},
-            TerminatorKind::FalseUnwind{real_target: real_target_bb, ..} =>
-                ykpack::Terminator::FalseUnwind{real_target_bb: u32::from(real_target_bb)},
         }
     }
 }
