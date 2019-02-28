@@ -31,7 +31,7 @@ use std::fs;
 use std::error::Error;
 use ykpack;
 
-const SECTION_NAME: &'static str = ".yk_bytecode";
+const SECTION_NAME: &'static str = ".yk_cfg";
 
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
 pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
