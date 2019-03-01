@@ -33,6 +33,7 @@ use std::fs::File;
 use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
 use std::error::Error;
+use rustc_data_structures::indexed_vec::Idx;
 use ykpack;
 
 const SECTION_NAME: &'static str = ".yk_cfg";
@@ -43,6 +44,18 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
     /// The index of the next TIR variable.
     next_var: usize,
+    dominator_tree: DominatorTree,
+}
+
+struct DominatorTree {
+    bb: BasicBlock,
+    children: Box<Vec<DominatorTree>>,
+}
+
+impl DominatorTree {
+    fn new(mir: &Mir) -> Self {
+        Self { bb: BasicBlock::new(0), children: Box::new(Vec::new()) }
+    }
 }
 
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
@@ -62,9 +75,11 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     sorted_def_ids.sort();
 
     for def_id in sorted_def_ids {
-        // A fresh context for each MIR, as each has it's own distinct set of local variables.
-        let ccx = ConvCx { tcx, next_var: 0 };
         if tcx.is_mir_available(*def_id) {
+            let mir = tcx.optimized_mir(*def_id);
+            let dominator_tree = DominatorTree::new(mir);
+            let ccx = ConvCx { tcx, next_var: 0, dominator_tree };
+
             let pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
             enc.serialise(pack)?;
         }

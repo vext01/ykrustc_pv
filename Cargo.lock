@@ -3076,6 +3076,7 @@ version = "0.0.0"
 dependencies = [
  "rustc 0.0.0",
  "rustc_codegen_utils 0.0.0",
+ "rustc_data_structures 0.0.0",
  "rustc_yk_link 0.0.0",
  "ykpack 0.1.0",
 ]

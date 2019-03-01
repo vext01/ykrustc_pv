@@ -13,5 +13,6 @@ extern crate rustc;
 extern crate rustc_yk_link;
 extern crate rustc_codegen_utils;
 extern crate ykpack;
+extern crate rustc_data_structures;
 
 pub mod mir_cfg;
