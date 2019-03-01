@@ -9,10 +9,13 @@
 
 #![allow(unused_imports)]
 
-//! MIR to Yorick bytecode converter/serialiser.
+//! MIR to TIR converter/serialiser.
 //!
-//! We convert the compile-time MIR information into our own custom bytecode and stash it away in
-//! an ELF section so that the JIT runtime can find it, and use it for trace generation later.
+//! We convert Rust's MIR into our own IR we call "TIR" (tracing IR), which is then stashed away in
+//! an ELF section so that the JIT runtime can use it later.
+//!
+//!  * Unlike MIR, TIR is stored in SSA form.
+//!  * We preserve the MIR block structure.
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
