@@ -7,7 +7,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_imports)]
+#![allow(unused_imports, unused_variables, dead_code)]
 
 //! MIR to TIR converter/serialiser.
 //!
@@ -36,6 +36,14 @@ use ykpack;
 
 const SECTION_NAME: &'static str = ".yk_cfg";
 
+/// A conversion context holds the state needed to perform the conversion.
+struct ConvCx<'a, 'tcx, 'gcx> {
+    /// The compiler's god struct. Needed for queries etc.
+    tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
+    /// The index of the next TIR variable.
+    next_var: usize,
+}
+
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
 pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, exe_filename: PathBuf)
@@ -53,8 +61,10 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     sorted_def_ids.sort();
 
     for def_id in sorted_def_ids {
+        // A fresh context for each MIR, as each has it's own distinct set of local variables.
+        let ccx = ConvCx { tcx, next_var: 0 };
         if tcx.is_mir_available(*def_id) {
-            let pack = (tcx, def_id, tcx.optimized_mir(*def_id)).to_pack();
+            let pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
             enc.serialise(pack)?;
         }
     }
@@ -73,34 +83,35 @@ trait ToPack<T> {
     fn to_pack(&self) -> T;
 }
 
-impl<'tcx> ToPack<ykpack::Pack> for (&TyCtxt<'_, 'tcx, '_>, &DefId, &Mir<'tcx>) {
+impl<'tcx> ToPack<ykpack::Pack> for (&ConvCx<'_, 'tcx, '_>, &DefId, &Mir<'tcx>) {
     fn to_pack(&self) -> ykpack::Pack {
-        let (tcx, def_id, mir) = self;
+        let (ccx, def_id, mir) = self;
 
         let mut ser_blks = Vec::new();
         for bb_data in mir.basic_blocks() {
-            ser_blks.push((*tcx, bb_data).to_pack());
+            ser_blks.push((*ccx, bb_data).to_pack());
         }
 
         let ser_def_id = ykpack::DefId::new(
-            tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
+            ccx.tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
 
         ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
     }
 }
 
-impl ToPack<ykpack::DefId> for (&TyCtxt<'_, '_, '_>, &DefId) {
+impl ToPack<ykpack::DefId> for (&ConvCx<'_, '_, '_>, &DefId) {
     fn to_pack(&self) -> ykpack::DefId {
+        let (ccx, def_id) = self;
         ykpack::DefId {
-            crate_hash: self.0.crate_hash(self.1.krate).as_u64(),
-            def_idx: self.1.index.as_raw_u32(),
+            crate_hash: ccx.tcx.crate_hash(def_id.krate).as_u64(),
+            def_idx: def_id.index.as_raw_u32(),
         }
     }
 }
 
-impl<'tcx> ToPack<ykpack::Terminator> for (&TyCtxt<'_, 'tcx, '_>, &Terminator<'tcx>) {
+impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'tcx>) {
     fn to_pack(&self) -> ykpack::Terminator {
-        let (tcx, term) = self;
+        let (ccx, term) = self;
 
         match term.kind {
             TerminatorKind::Goto{target: target_bb}
@@ -134,7 +145,7 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&TyCtxt<'_, 'tcx, '_>, &Terminator<'t
                     }), ..
                 }, ..) = func {
                     // A statically known call target.
-                    ykpack::CallOperand::Fn((*tcx, &target_def_id).to_pack())
+                    ykpack::CallOperand::Fn((*ccx, &target_def_id).to_pack())
                 } else {
                     // FIXME -- implement other callables.
                     ykpack::CallOperand::Unknown
@@ -162,12 +173,12 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&TyCtxt<'_, 'tcx, '_>, &Terminator<'t
     }
 }
 
-impl<'tcx> ToPack<ykpack::BasicBlock> for (&TyCtxt<'_, 'tcx, '_>, &BasicBlockData<'tcx>) {
+impl<'tcx> ToPack<ykpack::BasicBlock> for (&ConvCx<'_, 'tcx, '_>, &BasicBlockData<'tcx>) {
     fn to_pack(&self) -> ykpack::BasicBlock {
-        let (tcx, bb_data) = self;
+        let (ccx, bb_data) = self;
 
         // FIXME. Implement block contents (currently an empty vector).
         // Unwrap here can't fail, as MIR terminators can only be None during construction.
-        ykpack::BasicBlock::new(Vec::new(), (*tcx, bb_data.terminator.as_ref().unwrap()).to_pack())
+        ykpack::BasicBlock::new(Vec::new(), (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
     }
 }
