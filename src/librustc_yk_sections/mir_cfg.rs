@@ -23,7 +23,8 @@ use rustc::ty::TyCtxt;
 
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
-    Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator
+    Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
+    Place, Rvalue, Statement
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -180,5 +181,42 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for (&ConvCx<'_, 'tcx, '_>, &BasicBlockDat
         // FIXME. Implement block contents (currently an empty vector).
         // Unwrap here can't fail, as MIR terminators can only be None during construction.
         ykpack::BasicBlock::new(Vec::new(), (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
+    }
+}
+
+impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, &Statement<'tcx>) {
+    fn to_pack(&self) -> ykpack::Statement {
+        let (ccx, ref stmt) = self;
+
+        match stmt.kind {
+            StatementKind::Assign(ref place, ref rval) => {
+                let lhs = (*ccx, place).to_pack();
+                let rhs = (*ccx, &**rval).to_pack();
+                ykpack::Statement::Assign(lhs, rhs)
+            },
+            _ => ykpack::Statement::Unimplemented,
+        }
+    }
+}
+
+impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
+    fn to_pack(&self) -> ykpack::Place {
+        let (ccx, place) = self;
+
+        match *place {
+            Place::Local(local_idx) => ykpack::Place::Local(u32::from(local_idx.as_u32())),
+            _ => ykpack::Place::Unimplemented, // FIXME
+        }
+    }
+}
+
+impl<'tcx> ToPack<ykpack::Rvalue> for (&ConvCx<'_, 'tcx, '_>, &Rvalue<'tcx>) {
+    fn to_pack(&self) -> ykpack::Rvalue {
+        let (ccx, rval) = self;
+
+        match *rval {
+            Rvalue::Use(Operand::Move(place)) => ykpack::Rvalue::Place((*ccx, place).to_pack()),
+            _ => ykpack::Rvalue::Unimplemented, // FIXME
+        }
     }
 }
