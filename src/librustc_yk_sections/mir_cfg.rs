@@ -140,7 +140,7 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
     /// Compiler Implementation in Java (2nd edition)", Chapter 19: Static Single-Assignment.
     /// Upstream rust already provides a way to get the dominators and immediate dominators (and
     /// hence also the dominator tree), so we just have to compute the frontiers.
-    fn get(&'a mut self, n: BasicBlock) -> &'a Vec<BasicBlock> {
+    fn get(&mut self, n: BasicBlock) -> &Vec<BasicBlock> {
         if self.df[n].is_none() {
             // We haven't yet computed dominator frontiers for this node. Compute them.
             let mut s: Vec<BasicBlock> = Vec::new();
@@ -161,14 +161,10 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
                 }
             }
 
-            let child_dfcs = children.iter().map(|c| (self.get(*c)));
-
             // Compute what Appel calls `DF_{up}[c]` for each dominator tree child `c` of `n`.
             let mut df_up_cs = Vec::new();
-            //for c in children {
-            for child_df in child_dfcs { // in children {
-                //for w in self.get(c) {
-                for w in child_df {
+            for c in children {
+                for w in self.get(c) {
                     if n == *w || !self.doms.is_dominated_by(*w, n) {
                         df_up_cs.push(*w);
                     }
