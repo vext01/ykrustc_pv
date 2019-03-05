@@ -24,7 +24,7 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement
+    Place, Rvalue, Statement, Successors
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -33,7 +33,8 @@ use std::fs::File;
 use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
 use std::error::Error;
-use rustc_data_structures::indexed_vec::Idx;
+use rustc_data_structures::indexed_vec::{Idx, IndexVec};
+use rustc_data_structures::graph::dominators::Dominators;
 use ykpack;
 
 const SECTION_NAME: &'static str = ".yk_cfg";
@@ -42,21 +43,31 @@ const SECTION_NAME: &'static str = ".yk_cfg";
 struct ConvCx<'a, 'tcx, 'gcx> {
     /// The compiler's god struct. Needed for queries etc.
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
-    /// The index of the next TIR variable.
-    next_var: usize,
-    dominator_tree: DominatorTree,
+    //// The index of the next TIR variable.
+    //next_var: usize,
+    //frontier: Dominators,
 }
 
-struct DominatorTree {
-    bb: BasicBlock,
-    children: Box<Vec<DominatorTree>>,
-}
+//struct DominatorTree {
+//    //bb: BasicBlock,
+//    //children: Box<Vec<DominatorTree>>,
+//    imm_doms: IndexVec<BasicBlock, BasicBlock>,
+//}
 
-impl DominatorTree {
-    fn new(mir: &Mir) -> Self {
-        Self { bb: BasicBlock::new(0), children: Box::new(Vec::new()) }
-    }
-}
+//impl DominatorTree {
+//    fn new(mir: &Mir) -> Self {
+//        let imm_doms = IndexVec::new();
+//        let doms = mir.dominators();
+//        for bb in mir.basic_blocks() {
+//            doms.push(DominatorTree::find_immed_doms(bb, &doms));
+//        }
+//        Self { imm_doms }
+//    }
+//
+//    fn find_immed_doms(bb: BasicBlock, doms: &Dominators) -> BasicBlock {
+//        bb_doms = doms.
+//    }
+//}
 
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
 pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
@@ -77,10 +88,19 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
             let mir = tcx.optimized_mir(*def_id);
-            let dominator_tree = DominatorTree::new(mir);
-            let ccx = ConvCx { tcx, next_var: 0, dominator_tree };
+            let ccx = ConvCx { tcx }; //, next_var: 0, dominators: mir.dominators };
 
+            // Get an initial TIR (not yet in SSA form).
             let pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
+
+            // Compute the dominance frontier for each basic block.
+            let fronts = get_dom_fronts(mir);
+            // FIXME
+
+            // Add PHI nodes.
+            // FIXME
+
+            // Put the finalised TIR to disk.
             enc.serialise(pack)?;
         }
     }
@@ -92,6 +112,84 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     fs::remove_file(path)?;
 
     Ok(ret)
+}
+
+// FIXME rename
+struct DominatorFrontiers<'a, 'tcx> {
+    mir: &'a Mir<'tcx>,
+    doms: Dominators<BasicBlock>,
+    df: IndexVec<BasicBlock, Option<Vec<BasicBlock>>>,
+}
+
+impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
+    fn new(mir: &'a Mir<'tcx>) -> Self {
+        let num_blks = mir.basic_blocks().len();
+        let mut df = IndexVec::with_capacity(num_blks);
+        for _ in 0..num_blks {
+            df.push(None);
+        }
+
+        Self {
+            mir,
+            doms: mir.dominators(),
+            df,
+        }
+    }
+
+    /// Compute the dominance frontier. This is the algorithm from Andrew W. Appel's book "Modern
+    /// Compiler Implementation in Java (2nd edition)", Chapter 19: Static Single-Assignment.
+    /// Upstream rust already provides a way to get the dominators and immediate dominators (and
+    /// hence also the dominator tree), so we just have to compute the frontiers.
+    fn get(&'a mut self, n: BasicBlock) -> &'a Vec<BasicBlock> {
+        if self.df[n].is_none() {
+            // We haven't yet computed dominator frontiers for this node. Compute them.
+            let mut s: Vec<BasicBlock> = Vec::new();
+
+            // Append what Appel calls 'DF_{local}[n]'.
+            for y in self.mir.basic_blocks()[n].terminator().successors() {
+                if self.doms.immediate_dominator(*y) != n {
+                    s.push(*y);
+                }
+            }
+
+            // The second stage of the algorithm needs the children nodes in the dominator tree.
+            let mut children = Vec::new();
+            for (b, _) in self.mir.basic_blocks().iter_enumerated() {
+                let b = BasicBlock::from_u32(b.as_u32());
+                if self.doms.is_dominated_by(b, n) && b != n {
+                    children.push(b);
+                }
+            }
+
+            let child_dfcs = children.iter().map(|c| (self.get(*c)));
+
+            // Compute what Appel calls `DF_{up}[c]` for each dominator tree child `c` of `n`.
+            let mut df_up_cs = Vec::new();
+            //for c in children {
+            for child_df in child_dfcs { // in children {
+                //for w in self.get(c) {
+                for w in child_df {
+                    if n == *w || !self.doms.is_dominated_by(*w, n) {
+                        df_up_cs.push(*w);
+                    }
+                }
+            }
+            
+            s.extend(df_up_cs);
+
+            self.df[n] = Some(s);
+        }
+
+        self.df[n].as_ref().unwrap()
+    }
+}
+
+// FIXME, no need to force the fronts -- let it be lazy.
+fn get_dom_fronts(mir: &Mir) { //-> IndexVec<BasicBlock, Vec<BasicBlock>> {
+    let mut dcx = DominatorFrontiers::new(mir);
+    for (bb, _) in mir.basic_blocks().iter_enumerated() {
+        dcx.get(bb);
+    }
 }
 
 /// The trait for converting MIR data structures into a bytecode packs.

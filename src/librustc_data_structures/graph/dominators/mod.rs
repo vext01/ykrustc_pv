@@ -13,8 +13,7 @@ use std::fmt;
 #[cfg(test)]
 mod test;
 
-pub fn dominators<G: ControlFlowGraph>(graph: &G) -> Dominators<G::Node> {
-    let start_node = graph.start_node();
+pub fn dominators<G: ControlFlowGraph>(graph: &G) -> Dominators<G::Node> { let start_node = graph.start_node();
     let rpo = reverse_post_order(graph, start_node);
     dominators_given_rpo(graph, &rpo)
 }
