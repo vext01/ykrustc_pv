@@ -254,8 +254,8 @@ impl<'tcx> ToPack<ykpack::Pack> for (&ConvCx<'_, 'tcx, '_>, &DefId, &Mir<'tcx>) 
         let (ccx, def_id, mir) = self;
 
         let mut ser_blks = Vec::new();
-        for bb_data in mir.basic_blocks() {
-            ser_blks.push((*ccx, bb_data).to_pack());
+        for (bb, bb_data) in mir.basic_blocks().iter_enumerated() {
+            ser_blks.push((*ccx, bb, bb_data).to_pack());
         }
 
         let ser_def_id = ykpack::DefId::new(
@@ -339,26 +339,24 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
     }
 }
 
-impl<'tcx> ToPack<ykpack::BasicBlock> for (&ConvCx<'_, 'tcx, '_>, &BasicBlockData<'tcx>) {
+impl<'tcx> ToPack<ykpack::BasicBlock> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &BasicBlockData<'tcx>) {
     fn to_pack(&mut self) -> ykpack::BasicBlock {
-        let (ccx, bb_data) = self;
-
-        // FIXME. Implement block contents (currently an empty vector).
-        // Unwrap here can't fail, as MIR terminators can only be None during construction.
-        ykpack::BasicBlock::new(Vec::new(), (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
+        let (ccx, bb, bb_data) = self;
+        let ser_stmts = bb_data.statements.iter().map(|stmt| (*ccx, *bb, stmt).to_pack());
+        ykpack::BasicBlock::new(ser_stmts.collect(), (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
     }
 }
 
-impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, &Statement<'tcx>) {
+impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &Statement<'tcx>) {
     fn to_pack(&mut self) -> ykpack::Statement {
-        let (ccx, ref stmt) = self;
+        let (ccx, bb, ref stmt) = self;
 
         match stmt.kind {
             StatementKind::Assign(ref place, ref rval) => {
                 let lhs = (*ccx, place).to_pack();
                 let rhs = (*ccx, &**rval).to_pack();
                 if let ykpack::Place::Local(tvar) = lhs {
-                    ccx.push_def_site(BasicBlock::new(0), tvar); // FIXME bb
+                    ccx.push_def_site(*bb, tvar);
                 }
                 ykpack::Statement::Assign(lhs, rhs)
             },
