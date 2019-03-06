@@ -8,6 +8,7 @@
 // except according to those terms.
 
 #![feature(box_patterns)]
+#![feature(try_from)]
 
 extern crate rustc;
 extern crate rustc_yk_link;

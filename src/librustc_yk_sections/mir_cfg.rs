@@ -24,50 +24,83 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Successors
+    Place, Rvalue, Statement, Successors, Local
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
+use rustc::mir::HasLocalDecls;
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
 use std::fs::File;
+use std::convert::TryFrom;
 use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
 use std::error::Error;
+use std::cell::RefCell;
 use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 use rustc_data_structures::graph::dominators::Dominators;
 use ykpack;
 
 const SECTION_NAME: &'static str = ".yk_cfg";
+type TirVarIndex = u32;
 
-/// A conversion context holds the state needed to perform the conversion.
+// FIXME, can't get this to work.
+//newtype_index! {
+//    pub struct TirVarIndex { .. }
+//}
+
+/// A conversion context holds the state needed to perform the conversion to (non-SSA) TIR.
 struct ConvCx<'a, 'tcx, 'gcx> {
     /// The compiler's god struct. Needed for queries etc.
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
-    //// The index of the next TIR variable.
-    //next_var: usize,
-    //frontier: Dominators,
+    /// The number of (non-SSA) TIR variables.
+    //num_tir_vars: TirVarIndex,
+    /// The definition sites of TIR variable in terms of basic blocks.
+    def_sites: RefCell<Vec<Vec<BasicBlock>>>,
+    /// A mapping from MIR variables to TIR variables.
+    var_map: RefCell<IndexVec<Local, Option<TirVarIndex>>>, // FIXME better type than u32.
 }
 
-//struct DominatorTree {
-//    //bb: BasicBlock,
-//    //children: Box<Vec<DominatorTree>>,
-//    imm_doms: IndexVec<BasicBlock, BasicBlock>,
-//}
+impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
+    fn new(tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, mir: &Mir<'tcx>) -> Self {
+        let num_locals = mir.local_decls().len();
+        let mut var_map = IndexVec::new();
+        var_map.resize(num_locals, None);
 
-//impl DominatorTree {
-//    fn new(mir: &Mir) -> Self {
-//        let imm_doms = IndexVec::new();
-//        let doms = mir.dominators();
-//        for bb in mir.basic_blocks() {
-//            doms.push(DominatorTree::find_immed_doms(bb, &doms));
-//        }
-//        Self { imm_doms }
-//    }
-//
-//    fn find_immed_doms(bb: BasicBlock, doms: &Dominators) -> BasicBlock {
-//        bb_doms = doms.
-//    }
-//}
+        Self {
+            tcx,
+            def_sites: RefCell::new(Vec::new()),
+            var_map: RefCell::new(var_map),
+        }
+    }
+
+    /// Create a mapping entry from the Local MIR variable `local` to a fresh TIR variable.
+    fn new_tir_var(&self, local: Local) -> TirVarIndex {
+        let ds = self.def_sites.borrow_mut();
+        let var_idx = u32::try_from(ds.len()).unwrap();
+        self.var_map.borrow_mut()[local] = Some(var_idx);
+        var_idx
+    }
+
+    /// Get the TIR variable corresponding with the MIR variable `local`, creating a fresh
+    /// variable if needed.
+    fn get_tir_var(&self, local: Local) -> TirVarIndex {
+        let local_u32 = local.as_u32();
+
+        match self.var_map.borrow_mut()[local] {
+            None => self.new_tir_var(local),
+            Some(tvar) => tvar,
+        }
+    }
+
+    fn def_sites(self) -> Vec<Vec<BasicBlock>> {
+        self.def_sites.into_inner()
+    }
+
+    /// Add `bb` as a definition site of the TIR variable `var`.
+    fn push_def_site(&self, bb: BasicBlock, var: TirVarIndex) {
+        self.def_sites.borrow_mut()[usize::try_from(var).unwrap()].push(bb);
+    }
+}
 
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
 pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
@@ -88,14 +121,13 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
             let mir = tcx.optimized_mir(*def_id);
-            let ccx = ConvCx { tcx }; //, next_var: 0, dominators: mir.dominators };
+            let ccx = ConvCx::new(tcx, mir);
 
             // Get an initial TIR (not yet in SSA form).
             let pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
 
             // Compute the dominance frontier for each basic block.
-            let fronts = get_dom_fronts(mir);
-            // FIXME
+            let mut dfronts = DominatorFrontiers::new(mir);
 
             // Add PHI nodes.
             // FIXME
@@ -114,7 +146,14 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
     Ok(ret)
 }
 
-// FIXME rename
+/// Lazy computation of dominance frontiers.
+///
+/// We use the algorithm from Andrew W. Appel's book:
+/// "Modern Compiler Implementation in Java (2nd edition)", Chapter 19: Static Single-Assignment.
+///
+/// Since the frontier of one node may depend on the frontiers of other nodes (depending upon node
+/// relationships), we cache the frontiers so as to avoid computing the frontier for any given node
+/// more than once.
 struct DominatorFrontiers<'a, 'tcx> {
     mir: &'a Mir<'tcx>,
     doms: Dominators<BasicBlock>,
@@ -136,10 +175,6 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
         }
     }
 
-    /// Compute the dominance frontier. This is the algorithm from Andrew W. Appel's book "Modern
-    /// Compiler Implementation in Java (2nd edition)", Chapter 19: Static Single-Assignment.
-    /// Upstream rust already provides a way to get the dominators and immediate dominators (and
-    /// hence also the dominator tree), so we just have to compute the frontiers.
     fn get(&mut self, n: BasicBlock) -> &Vec<BasicBlock> {
         if self.df[n].is_none() {
             // We haven't yet computed dominator frontiers for this node. Compute them.
@@ -158,19 +193,22 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
                 let b = BasicBlock::from_u32(b.as_u32());
                 if self.doms.is_dominated_by(b, n) && b != n {
                     children.push(b);
+                    // Force the frontier of `b` into `self.df`. Doing this here avoids a
+                    // simultaneous mutable + immutable borrow of `self` in the final stage of the
+                    // algorithm.
+                    self.get(b);
                 }
             }
 
             // Compute what Appel calls `DF_{up}[c]` for each dominator tree child `c` of `n`.
             let mut df_up_cs = Vec::new();
             for c in children {
-                for w in self.get(c) {
+                for w in self.df[c].as_ref().unwrap() {
                     if n == *w || !self.doms.is_dominated_by(*w, n) {
                         df_up_cs.push(*w);
                     }
                 }
             }
-            
             s.extend(df_up_cs);
 
             self.df[n] = Some(s);
@@ -180,21 +218,39 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
     }
 }
 
-// FIXME, no need to force the fronts -- let it be lazy.
-fn get_dom_fronts(mir: &Mir) { //-> IndexVec<BasicBlock, Vec<BasicBlock>> {
-    let mut dcx = DominatorFrontiers::new(mir);
-    for (bb, _) in mir.basic_blocks().iter_enumerated() {
-        dcx.get(bb);
+//struct SsaVar {
+//    var: Local,
+//    version: u32,
+//}
+
+struct ComputePhis<'a, 'tcx> {
+    df: DominatorFrontiers<'a, 'tcx>,
+}
+
+impl<'a, 'tcx> ComputePhis<'a, 'tcx> {
+    fn new(df: DominatorFrontiers, def_sites: Vec<Vec<BasicBlock>>, mir: &Mir) {
+        // The first stage of the algorithm builds a mapping from non-ssa variables to def sites.
+        //let num_locals = mir.locals().len();
+        //let mut def_sites: IndexVec<Local, Vec<BasicBlock>> = IndexVec::with_capacity(num_locals);
+        //for _ in 0..num_locals {
+        //    def_sites.push(Vec::new());
+        //}
+
+        //for (n, bb_data) in mir.basic_blocks().iter_enumerated() {
+        //    for _stmt in bb_data.statements() {
+        //    }
+        //}
+
     }
 }
 
 /// The trait for converting MIR data structures into a bytecode packs.
 trait ToPack<T> {
-    fn to_pack(&self) -> T;
+    fn to_pack(&mut self) -> T;
 }
 
 impl<'tcx> ToPack<ykpack::Pack> for (&ConvCx<'_, 'tcx, '_>, &DefId, &Mir<'tcx>) {
-    fn to_pack(&self) -> ykpack::Pack {
+    fn to_pack(&mut self) -> ykpack::Pack {
         let (ccx, def_id, mir) = self;
 
         let mut ser_blks = Vec::new();
@@ -210,7 +266,7 @@ impl<'tcx> ToPack<ykpack::Pack> for (&ConvCx<'_, 'tcx, '_>, &DefId, &Mir<'tcx>) 
 }
 
 impl ToPack<ykpack::DefId> for (&ConvCx<'_, '_, '_>, &DefId) {
-    fn to_pack(&self) -> ykpack::DefId {
+    fn to_pack(&mut self) -> ykpack::DefId {
         let (ccx, def_id) = self;
         ykpack::DefId {
             crate_hash: ccx.tcx.crate_hash(def_id.krate).as_u64(),
@@ -220,7 +276,7 @@ impl ToPack<ykpack::DefId> for (&ConvCx<'_, '_, '_>, &DefId) {
 }
 
 impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'tcx>) {
-    fn to_pack(&self) -> ykpack::Terminator {
+    fn to_pack(&mut self) -> ykpack::Terminator {
         let (ccx, term) = self;
 
         match term.kind {
@@ -284,7 +340,7 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
 }
 
 impl<'tcx> ToPack<ykpack::BasicBlock> for (&ConvCx<'_, 'tcx, '_>, &BasicBlockData<'tcx>) {
-    fn to_pack(&self) -> ykpack::BasicBlock {
+    fn to_pack(&mut self) -> ykpack::BasicBlock {
         let (ccx, bb_data) = self;
 
         // FIXME. Implement block contents (currently an empty vector).
@@ -294,13 +350,16 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for (&ConvCx<'_, 'tcx, '_>, &BasicBlockDat
 }
 
 impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, &Statement<'tcx>) {
-    fn to_pack(&self) -> ykpack::Statement {
+    fn to_pack(&mut self) -> ykpack::Statement {
         let (ccx, ref stmt) = self;
 
         match stmt.kind {
             StatementKind::Assign(ref place, ref rval) => {
                 let lhs = (*ccx, place).to_pack();
                 let rhs = (*ccx, &**rval).to_pack();
+                if let ykpack::Place::Local(tvar) = lhs {
+                    ccx.push_def_site(BasicBlock::new(0), tvar); // FIXME bb
+                }
                 ykpack::Statement::Assign(lhs, rhs)
             },
             _ => ykpack::Statement::Unimplemented,
@@ -309,18 +368,18 @@ impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, &Statement<'tcx
 }
 
 impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
-    fn to_pack(&self) -> ykpack::Place {
+    fn to_pack(&mut self) -> ykpack::Place {
         let (ccx, place) = self;
 
         match *place {
-            Place::Local(local_idx) => ykpack::Place::Local(u32::from(local_idx.as_u32())),
+            Place::Local(local) => ykpack::Place::Local(ccx.get_tir_var(*local)),
             _ => ykpack::Place::Unimplemented, // FIXME
         }
     }
 }
 
 impl<'tcx> ToPack<ykpack::Rvalue> for (&ConvCx<'_, 'tcx, '_>, &Rvalue<'tcx>) {
-    fn to_pack(&self) -> ykpack::Rvalue {
+    fn to_pack(&mut self) -> ykpack::Rvalue {
         let (ccx, rval) = self;
 
         match *rval {
