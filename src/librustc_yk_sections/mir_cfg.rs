@@ -48,7 +48,7 @@ type TirVarIndex = u32;
 //    pub struct TirVarIndex { .. }
 //}
 
-/// A conversion context holds the state needed to perform the conversion to (non-SSA) TIR.
+/// A conversion context holds the state needed to perform the conversion to (pre-SSA) TIR.
 struct ConvCx<'a, 'tcx, 'gcx> {
     /// The compiler's god struct. Needed for queries etc.
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
@@ -124,16 +124,13 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
             let ccx = ConvCx::new(tcx, mir);
 
             // Get an initial TIR (not yet in SSA form).
-            let pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
-
-            // Compute the dominance frontier for each basic block.
-            let mut dfronts = DominatorFrontiers::new(mir);
+            let pre_ssa_pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
 
             // Add PHI nodes.
-            // FIXME
+            let phied_pack = PhiInserter::new(mir, pre_ssa_pack, ccx.def_sites()).pack();
 
             // Put the finalised TIR to disk.
-            enc.serialise(pack)?;
+            enc.serialise(phied_pack)?;
         }
     }
     enc.done()?;
@@ -223,24 +220,70 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
 //    version: u32,
 //}
 
-struct ComputePhis<'a, 'tcx> {
-    df: DominatorFrontiers<'a, 'tcx>,
+struct PhiInserter<'a, 'tcx> {
+    mir: &'a Mir<'tcx>,
+    pack: ykpack::Pack,
+    def_sites: Vec<Vec<BasicBlock>>,
 }
 
-impl<'a, 'tcx> ComputePhis<'a, 'tcx> {
-    fn new(df: DominatorFrontiers, def_sites: Vec<Vec<BasicBlock>>, mir: &Mir) {
-        // The first stage of the algorithm builds a mapping from non-ssa variables to def sites.
-        //let num_locals = mir.locals().len();
-        //let mut def_sites: IndexVec<Local, Vec<BasicBlock>> = IndexVec::with_capacity(num_locals);
-        //for _ in 0..num_locals {
-        //    def_sites.push(Vec::new());
-        //}
+impl<'a, 'tcx> PhiInserter<'a, 'tcx> {
+    fn new(mir: &'a Mir<'tcx>, pack: ykpack::Pack, def_sites: Vec<Vec<BasicBlock>>) -> Self {
+        Self {
+            mir,
+            pack,
+            def_sites,
+        }
+    }
 
-        //for (n, bb_data) in mir.basic_blocks().iter_enumerated() {
-        //    for _stmt in bb_data.statements() {
-        //    }
-        //}
+    fn pack(mut self) -> ykpack::Pack {
+        let mut df = DominatorFrontiers::new(self.mir);
 
+        // We first need a mapping from block to the variables it defines. Appel calls this
+        // `A_{orig}`. We can derive this from our definition sites.
+        let a_orig = {
+            let ykpack::Pack::Mir(ykpack::Mir{ref blocks, ..}) = self.pack;
+            let mut a_orig: IndexVec<BasicBlock, Vec<TirVarIndex>> = IndexVec::with_capacity(blocks.len());
+            a_orig.resize(blocks.len(), Vec::default());
+            for (a, def_blks) in self.def_sites.iter().enumerate() {
+                for bb in def_blks {
+                    a_orig[*bb].push(u32::try_from(a).unwrap())
+                }
+            }
+
+            a_orig
+        };
+
+        let mut a_phi: Vec<Vec<TirVarIndex>> = Vec::new();
+        for (a, def_sites) in self.def_sites.iter().enumerate() {
+            let mut w = def_sites.clone();
+            while w.len() > 0 {
+                let n = w.pop().unwrap();
+                for y in df.get(n) {
+                    let y_usize = y.index();
+                    let a_u32 = u32::try_from(a).unwrap();
+                    if !a_phi[y_usize].contains(&a_u32) {
+                        a_phi[y_usize].push(a_u32);
+                    }
+                    if !a_orig[*y].contains(&a_u32) {
+                        w.push(*y);
+                    }
+                }
+            }
+        }
+
+        // `a_phi` now tells use where to insert PHI nodes.
+        {
+            let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = self.pack;
+            for (bb, mut bb_data) in blocks.iter_mut().enumerate() {
+                for a in &a_phi[bb] {
+                    let lhs = ykpack::Place::Local(*a);
+                    let rhs = ykpack::Rvalue::Phi(vec![Box::new(lhs.clone())]); // FIXME number of args.
+                    bb_data.stmts.insert(0, ykpack::Statement::Assign(lhs, rhs));
+                }
+            }
+        }
+
+        self.pack
     }
 }
 
