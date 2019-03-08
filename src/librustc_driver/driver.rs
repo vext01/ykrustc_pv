@@ -41,7 +41,7 @@ use syntax_pos::{FileName, hygiene};
 use syntax_ext;
 
 use rustc_codegen_utils::link::out_filename;
-use rustc_yk_sections::mir_cfg::generate_yorick_bytecode;
+use rustc_yk_sections::mir_cfg::generate_tir;
 use rustc::util::nodemap::DefIdSet;
 use std::sync::Arc;
 use rustc::hir::def_id::LOCAL_CRATE;
@@ -339,7 +339,7 @@ pub fn compile_input(
                         tcx.sess, config::CrateType::Executable, &outputs,
                         &*tcx.crate_name(LOCAL_CRATE).as_str());
 
-                    match generate_yorick_bytecode(&tcx, &def_ids, out_fname) {
+                    match generate_tir(&tcx, &def_ids, out_fname) {
                         Ok(link_obj) => tcx.sess.yk_link_objects.borrow_mut().push(link_obj),
                         Err(e) => {
                             sess.err(&format!("could not make Yorick bytecode: {}", e));

@@ -15,9 +15,19 @@
 //! an ELF section so that the JIT runtime can use it later.
 //!
 //!  * Unlike MIR, TIR is stored in SSA form.
+//!
 //!  * We preserve the MIR block structure.
+//!    i.e. there is a one-to-one mapping from a MIR block to a TIR block.
+//!
+//! When converting to SSA, we use the algorithms from Andrew W. Appel's book:
+//! "Modern Compiler Implementation in Java (2nd edition)", Chapter 19: Static Single-Assignment.
+//!
+//! Since we preserve the MIR structure, we can use Rustc's existing infrastructure to get the
+//! predecessors and dominators etc.
 //!
 //! Serialisation itself is performed by an external library: ykpack.
+
+// FIXME try_from abstract.
 
 use rustc::ty::TyCtxt;
 
@@ -35,7 +45,7 @@ use std::convert::TryFrom;
 use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
 use std::error::Error;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use rustc_data_structures::indexed_vec::{Idx, IndexVec};
 use rustc_data_structures::graph::dominators::Dominators;
 use ykpack;
@@ -43,41 +53,35 @@ use ykpack;
 const SECTION_NAME: &'static str = ".yk_cfg";
 type TirVarIndex = u32;
 
-// FIXME, can't get this to work.
-//newtype_index! {
-//    pub struct TirVarIndex { .. }
-//}
-
 /// A conversion context holds the state needed to perform the conversion to (pre-SSA) TIR.
 struct ConvCx<'a, 'tcx, 'gcx> {
     /// The compiler's god struct. Needed for queries etc.
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
-    /// The number of (non-SSA) TIR variables.
-    //num_tir_vars: TirVarIndex,
     /// The definition sites of TIR variable in terms of basic blocks.
     def_sites: RefCell<Vec<Vec<BasicBlock>>>,
+    /// The next new TIR variable index.
+    next_tir_var: Cell<TirVarIndex>,
     /// A mapping from MIR variables to TIR variables.
-    var_map: RefCell<IndexVec<Local, Option<TirVarIndex>>>, // FIXME better type than u32.
+    var_map: RefCell<IndexVec<Local, Option<TirVarIndex>>>,
 }
 
 impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
     fn new(tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, mir: &Mir<'tcx>) -> Self {
         let num_locals = mir.local_decls().len();
-        let mut var_map = IndexVec::new();
-        var_map.resize(num_locals, None);
+        let var_map = IndexVec::new();
 
         Self {
             tcx,
             def_sites: RefCell::new(Vec::new()),
+            next_tir_var: Cell::new(0),
             var_map: RefCell::new(var_map),
         }
     }
 
-    /// Create a mapping entry from the Local MIR variable `local` to a fresh TIR variable.
-    fn new_tir_var(&self, local: Local) -> TirVarIndex {
-        let ds = self.def_sites.borrow_mut();
-        let var_idx = u32::try_from(ds.len()).unwrap();
-        self.var_map.borrow_mut()[local] = Some(var_idx);
+    /// Returns the next TIR variable index, incrementing the internal counter.
+    fn next_tir_var(&self) -> TirVarIndex {
+        let var_idx = self.next_tir_var.get();
+        self.next_tir_var.set(var_idx + 1);
         var_idx
     }
 
@@ -85,11 +89,24 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
     /// variable if needed.
     fn get_tir_var(&self, local: Local) -> TirVarIndex {
         let local_u32 = local.as_u32();
+        let mut var_map = self.var_map.borrow_mut();
 
-        match self.var_map.borrow_mut()[local] {
-            None => self.new_tir_var(local),
-            Some(tvar) => tvar,
+        // Resize the backing Vec if necessary.
+        if var_map.len() <= usize::try_from(local_u32).unwrap() {
+            var_map.resize(usize::try_from(local_u32 + 1).unwrap(), None);
         }
+
+        let v = match var_map[local] {
+            None => {
+                // Make a new variable.
+                let var_idx = self.next_tir_var();
+                var_map[local] = Some(var_idx);
+                var_idx
+            }
+            Some(tvar) => tvar,
+        };
+
+        v
     }
 
     fn def_sites(self) -> Vec<Vec<BasicBlock>> {
@@ -98,12 +115,16 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
 
     /// Add `bb` as a definition site of the TIR variable `var`.
     fn push_def_site(&self, bb: BasicBlock, var: TirVarIndex) {
-        self.def_sites.borrow_mut()[usize::try_from(var).unwrap()].push(bb);
+        let mut sites = self.def_sites.borrow_mut();
+        if sites.len() <= usize::try_from(var).unwrap() {
+            sites.resize((var + 1) as usize, Vec::new());
+        }
+        sites[usize::try_from(var).unwrap()].push(bb);
     }
 }
 
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
-pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
+pub fn generate_tir<'a, 'tcx, 'gcx>(
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, exe_filename: PathBuf)
     -> Result<YkExtraLinkObject, Box<dyn Error>> {
 
@@ -120,6 +141,8 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
 
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
+            info!("generating TIR for {:?}", def_id);
+
             let mir = tcx.optimized_mir(*def_id);
             let ccx = ConvCx::new(tcx, mir);
 
@@ -145,15 +168,16 @@ pub fn generate_yorick_bytecode<'a, 'tcx, 'gcx>(
 
 /// Lazy computation of dominance frontiers.
 ///
-/// We use the algorithm from Andrew W. Appel's book:
-/// "Modern Compiler Implementation in Java (2nd edition)", Chapter 19: Static Single-Assignment.
+/// See Page 404 of the 2nd edition of the Appel book mention above.
 ///
-/// Since the frontier of one node may depend on the frontiers of other nodes (depending upon node
-/// relationships), we cache the frontiers so as to avoid computing the frontier for any given node
-/// more than once.
+/// Since the frontier of one node may depend on the frontiers of other nodes (depending upon their
+/// relationships), we cache the frontiers so as to avoid computing things more than once.
 struct DominatorFrontiers<'a, 'tcx> {
+    /// The MIR we are working on.
     mir: &'a Mir<'tcx>,
+    /// The dominators of the above MIR.
     doms: Dominators<BasicBlock>,
+    /// The dominance frontiers. Lazily computed. None means as-yet uncomputed.
     df: IndexVec<BasicBlock, Option<Vec<BasicBlock>>>,
 }
 
@@ -172,6 +196,8 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
         }
     }
 
+    /// Get the dominance frontier of the given basic block, computing it if we have not already
+    /// done so.
     fn get(&mut self, n: BasicBlock) -> &Vec<BasicBlock> {
         if self.df[n].is_none() {
             // We haven't yet computed dominator frontiers for this node. Compute them.
@@ -215,11 +241,9 @@ impl<'a, 'tcx> DominatorFrontiers<'a, 'tcx> {
     }
 }
 
-//struct SsaVar {
-//    var: Local,
-//    version: u32,
-//}
-
+/// This struct deals with inserting PHI nodes into the initial pre-SSA TIR pack.
+///
+/// See the bottom of Page 406 of the 2nd edition of the Appel book mention above.
 struct PhiInserter<'a, 'tcx> {
     mir: &'a Mir<'tcx>,
     pack: ykpack::Pack,
@@ -235,12 +259,13 @@ impl<'a, 'tcx> PhiInserter<'a, 'tcx> {
         }
     }
 
+    /// Insert PHI nodes, returning the mutated pack.
     fn pack(mut self) -> ykpack::Pack {
         let mut df = DominatorFrontiers::new(self.mir);
 
         // We first need a mapping from block to the variables it defines. Appel calls this
         // `A_{orig}`. We can derive this from our definition sites.
-        let a_orig = {
+        let (a_orig, num_blks) = {
             let ykpack::Pack::Mir(ykpack::Mir{ref blocks, ..}) = self.pack;
             let mut a_orig: IndexVec<BasicBlock, Vec<TirVarIndex>> = IndexVec::with_capacity(blocks.len());
             a_orig.resize(blocks.len(), Vec::default());
@@ -250,10 +275,11 @@ impl<'a, 'tcx> PhiInserter<'a, 'tcx> {
                 }
             }
 
-            a_orig
+            (a_orig, blocks.len())
         };
 
-        let mut a_phi: Vec<Vec<TirVarIndex>> = Vec::new();
+        let mut a_phi: Vec<Vec<TirVarIndex>> = Vec::with_capacity(num_blks);
+        a_phi.resize(num_blks, Vec::new());
         for (a, def_sites) in self.def_sites.iter().enumerate() {
             let mut w = def_sites.clone();
             while w.len() > 0 {
