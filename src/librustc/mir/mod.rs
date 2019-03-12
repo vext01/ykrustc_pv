@@ -27,7 +27,7 @@ use syntax::ast::{self, Name};
 use syntax::symbol::InternedString;
 use syntax_pos::{Span, DUMMY_SP};
 use crate::ty::fold::{TypeFoldable, TypeFolder, TypeVisitor};
-use crate::ty::subst::{Subst, Substs};
+use crate::ty::subst::{Subst, SubstsRef};
 use crate::ty::layout::VariantIdx;
 use crate::ty::{
     self, AdtDef, CanonicalUserTypeAnnotations, ClosureSubsts, GeneratorSubsts, Region, Ty, TyCtxt,
@@ -413,7 +413,7 @@ pub enum Safety {
     /// Unsafe because of an unsafe fn
     FnUnsafe,
     /// Unsafe because of an `unsafe` block
-    ExplicitUnsafe(ast::NodeId),
+    ExplicitUnsafe(hir::HirId),
 }
 
 impl_stable_hash_for!(struct Mir<'tcx> {
@@ -1823,16 +1823,21 @@ pub enum RetagKind {
 /// The `FakeReadCause` describes the type of pattern why a `FakeRead` statement exists.
 #[derive(Copy, Clone, RustcEncodable, RustcDecodable, Debug)]
 pub enum FakeReadCause {
-    /// Inject a fake read of the borrowed input at the start of each arm's
-    /// pattern testing code.
+    /// Inject a fake read of the borrowed input at the end of each guards
+    /// code.
     ///
-    /// This should ensure that you cannot change the variant for an enum
-    /// while you are in the midst of matching on it.
+    /// This should ensure that you cannot change the variant for an enum while
+    /// you are in the midst of matching on it.
     ForMatchGuard,
 
     /// `let x: !; match x {}` doesn't generate any read of x so we need to
     /// generate a read of x to check that it is initialized and safe.
     ForMatchedPlace,
+
+    /// A fake read of the RefWithinGuard version of a bind-by-value variable
+    /// in a match guard to ensure that it's value hasn't change by the time
+    /// we create the OutsideGuard version.
+    ForGuardBinding,
 
     /// Officially, the semantics of
     ///
@@ -1891,6 +1896,14 @@ impl<'tcx> Debug for Statement<'tcx> {
 /// changing or disturbing program state.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
 pub enum Place<'tcx> {
+    Base(PlaceBase<'tcx>),
+
+    /// projection out of a place (access a field, deref a pointer, etc)
+    Projection(Box<PlaceProjection<'tcx>>),
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
+pub enum PlaceBase<'tcx> {
     /// local variable
     Local(Local),
 
@@ -1899,9 +1912,6 @@ pub enum Place<'tcx> {
 
     /// Constant code promoted to an injected static
     Promoted(Box<(Promoted, Ty<'tcx>)>),
-
-    /// projection out of a place (access a field, deref a pointer, etc)
-    Projection(Box<PlaceProjection<'tcx>>),
 }
 
 /// The `DefId` of a static, along with its normalized type (which is
@@ -1989,6 +1999,8 @@ newtype_index! {
 }
 
 impl<'tcx> Place<'tcx> {
+    pub const RETURN_PLACE: Place<'tcx> = Place::Base(PlaceBase::Local(RETURN_PLACE));
+
     pub fn field(self, f: Field, ty: Ty<'tcx>) -> Place<'tcx> {
         self.elem(ProjectionElem::Field(f, ty))
     }
@@ -2015,9 +2027,9 @@ impl<'tcx> Place<'tcx> {
     // FIXME: can we safely swap the semantics of `fn base_local` below in here instead?
     pub fn local(&self) -> Option<Local> {
         match self {
-            Place::Local(local) |
+            Place::Base(PlaceBase::Local(local)) |
             Place::Projection(box Projection {
-                base: Place::Local(local),
+                base: Place::Base(PlaceBase::Local(local)),
                 elem: ProjectionElem::Deref,
             }) => Some(*local),
             _ => None,
@@ -2027,9 +2039,9 @@ impl<'tcx> Place<'tcx> {
     /// Finds the innermost `Local` from this `Place`.
     pub fn base_local(&self) -> Option<Local> {
         match self {
-            Place::Local(local) => Some(*local),
+            Place::Base(PlaceBase::Local(local)) => Some(*local),
             Place::Projection(box Projection { base, elem: _ }) => base.base_local(),
-            Place::Promoted(..) | Place::Static(..) => None,
+            Place::Base(PlaceBase::Promoted(..)) | Place::Base(PlaceBase::Static(..)) => None,
         }
     }
 }
@@ -2039,14 +2051,19 @@ impl<'tcx> Debug for Place<'tcx> {
         use self::Place::*;
 
         match *self {
-            Local(id) => write!(fmt, "{:?}", id),
-            Static(box self::Static { def_id, ty }) => write!(
+            Base(PlaceBase::Local(id)) => write!(fmt, "{:?}", id),
+            Base(PlaceBase::Static(box self::Static { def_id, ty })) => write!(
                 fmt,
                 "({}: {:?})",
                 ty::tls::with(|tcx| tcx.item_path_str(def_id)),
                 ty
             ),
-            Promoted(ref promoted) => write!(fmt, "({:?}: {:?})", promoted.0, promoted.1),
+            Base(PlaceBase::Promoted(ref promoted)) => write!(
+                fmt,
+                "({:?}: {:?})",
+                promoted.0,
+                promoted.1
+            ),
             Projection(ref data) => match data.elem {
                 ProjectionElem::Downcast(ref adt_def, index) => {
                     write!(fmt, "({:?} as {})", data.base, adt_def.variants[index].ident)
@@ -2098,8 +2115,8 @@ pub struct SourceScopeData {
 
 #[derive(Clone, Debug, RustcEncodable, RustcDecodable)]
 pub struct SourceScopeLocalData {
-    /// A NodeId with lint levels equivalent to this scope's lint levels.
-    pub lint_root: ast::NodeId,
+    /// A HirId with lint levels equivalent to this scope's lint levels.
+    pub lint_root: hir::HirId,
     /// The unsafe block that contains this node.
     pub safety: Safety,
 }
@@ -2146,7 +2163,7 @@ impl<'tcx> Operand<'tcx> {
     pub fn function_handle<'a>(
         tcx: TyCtxt<'a, 'tcx, 'tcx>,
         def_id: DefId,
-        substs: &'tcx Substs<'tcx>,
+        substs: SubstsRef<'tcx>,
         span: Span,
     ) -> Self {
         let ty = tcx.type_of(def_id).subst(tcx, substs);
@@ -2220,6 +2237,9 @@ pub enum CastKind {
     /// Converts safe fn() to unsafe fn()
     UnsafeFnPointer,
 
+    /// Coerces *mut T to *const T, preserving T.
+    MutToConstPointer,
+
     /// "Unsize" -- convert a thin-or-fat pointer to a fat pointer.
     /// codegen must figure out the details once full monomorphization
     /// is known. For example, this could be used to cast from a
@@ -2242,7 +2262,7 @@ pub enum AggregateKind<'tcx> {
     Adt(
         &'tcx AdtDef,
         VariantIdx,
-        &'tcx Substs<'tcx>,
+        SubstsRef<'tcx>,
         Option<UserTypeAnnotationIndex>,
         Option<usize>,
     ),
@@ -2391,15 +2411,15 @@ impl<'tcx> Debug for Rvalue<'tcx> {
                     }
 
                     AggregateKind::Closure(def_id, _) => ty::tls::with(|tcx| {
-                        if let Some(node_id) = tcx.hir().as_local_node_id(def_id) {
+                        if let Some(hir_id) = tcx.hir().as_local_hir_id(def_id) {
                             let name = if tcx.sess.opts.debugging_opts.span_free_formats {
-                                format!("[closure@{:?}]", node_id)
+                                format!("[closure@{:?}]", hir_id)
                             } else {
-                                format!("[closure@{:?}]", tcx.hir().span(node_id))
+                                format!("[closure@{:?}]", tcx.hir().span_by_hir_id(hir_id))
                             };
                             let mut struct_fmt = fmt.debug_struct(&name);
 
-                            tcx.with_freevars(node_id, |freevars| {
+                            tcx.with_freevars(hir_id, |freevars| {
                                 for (freevar, place) in freevars.iter().zip(places) {
                                     let var_name = tcx.hir().name(freevar.var_id());
                                     struct_fmt.field(&var_name.as_str(), place);
@@ -2413,11 +2433,12 @@ impl<'tcx> Debug for Rvalue<'tcx> {
                     }),
 
                     AggregateKind::Generator(def_id, _, _) => ty::tls::with(|tcx| {
-                        if let Some(node_id) = tcx.hir().as_local_node_id(def_id) {
-                            let name = format!("[generator@{:?}]", tcx.hir().span(node_id));
+                        if let Some(hir_id) = tcx.hir().as_local_hir_id(def_id) {
+                            let name = format!("[generator@{:?}]",
+                                               tcx.hir().span_by_hir_id(hir_id));
                             let mut struct_fmt = fmt.debug_struct(&name);
 
-                            tcx.with_freevars(node_id, |freevars| {
+                            tcx.with_freevars(hir_id, |freevars| {
                                 for (freevar, place) in freevars.iter().zip(places) {
                                     let var_name = tcx.hir().name(freevar.var_id());
                                     struct_fmt.field(&var_name.as_str(), place);
@@ -2849,8 +2870,8 @@ pub enum UnsafetyViolationKind {
     General,
     /// Permitted in const fn and regular fns.
     GeneralAndConstFn,
-    ExternStatic(ast::NodeId),
-    BorrowPacked(ast::NodeId),
+    ExternStatic(hir::HirId),
+    BorrowPacked(hir::HirId),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
@@ -2867,7 +2888,7 @@ pub struct UnsafetyCheckResult {
     pub violations: Lrc<[UnsafetyViolation]>,
     /// unsafe blocks in this function, along with whether they are used. This is
     /// used for the "unused_unsafe" lint.
-    pub unsafe_blocks: Lrc<[(ast::NodeId, bool)]>,
+    pub unsafe_blocks: Lrc<[(hir::HirId, bool)]>,
 }
 
 /// The layout of generator state

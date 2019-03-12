@@ -12,7 +12,6 @@ use syntax::ast;
 use syntax::ext::base::ExtCtxt;
 use syntax::parse::lexer::comments;
 use syntax::parse::{self, token, ParseSess};
-use syntax::parse::parser::emit_unclosed_delims;
 use syntax::tokenstream::{self, DelimSpan, IsJoint::*, TokenStream, TreeAndJoint};
 use syntax_pos::hygiene::{SyntaxContext, Transparency};
 use syntax_pos::symbol::{keywords, Symbol};
@@ -69,7 +68,7 @@ impl FromInternal<(TreeAndJoint, &'_ ParseSess, &'_ mut Vec<Self>)>
         };
 
         macro_rules! tt {
-            ($ty:ident { $($field:ident $(: $value:expr)*),+ $(,)* }) => (
+            ($ty:ident { $($field:ident $(: $value:expr)*),+ $(,)? }) => (
                 TokenTree::$ty(self::$ty {
                     $($field $(: $value)*,)*
                     span,
@@ -178,8 +177,8 @@ impl FromInternal<(TreeAndJoint, &'_ ParseSess, &'_ mut Vec<Self>)>
                 tt!(Punct::new('#', false))
             }
 
-            Interpolated(_) => {
-                let stream = token.interpolated_to_tokenstream(sess, span);
+            Interpolated(nt) => {
+                let stream = nt.to_tokenstream(sess, span);
                 TokenTree::Group(Group {
                     delimiter: Delimiter::None,
                     stream,
@@ -410,14 +409,12 @@ impl server::TokenStream for Rustc<'_> {
         stream.is_empty()
     }
     fn from_str(&mut self, src: &str) -> Self::TokenStream {
-        let (tokens, errors) = parse::parse_stream_from_source_str(
+        parse::parse_stream_from_source_str(
             FileName::proc_macro_source_code(src.clone()),
             src.to_string(),
             self.sess,
             Some(self.call_site),
-        );
-        emit_unclosed_delims(&errors, &self.sess.span_diagnostic);
-        tokens
+        )
     }
     fn to_string(&mut self, stream: &Self::TokenStream) -> String {
         stream.to_string()

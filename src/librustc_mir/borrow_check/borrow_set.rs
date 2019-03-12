@@ -3,9 +3,7 @@ use crate::borrow_check::nll::ToRegionVid;
 use crate::dataflow::indexes::BorrowIndex;
 use crate::dataflow::move_paths::MoveData;
 use rustc::mir::traversal;
-use rustc::mir::visit::{
-    PlaceContext, Visitor, NonUseContext, MutatingUseContext, NonMutatingUseContext
-};
+use rustc::mir::visit::{PlaceContext, Visitor, NonUseContext, MutatingUseContext};
 use rustc::mir::{self, Location, Mir, Local};
 use rustc::ty::{RegionVid, TyCtxt};
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
@@ -257,31 +255,21 @@ impl<'a, 'gcx, 'tcx> Visitor<'tcx> for GatherBorrows<'a, 'gcx, 'tcx> {
                 );
             }
 
-            // Otherwise, this is the unique later use
-            // that we expect.
-            borrow_data.activation_location = match context {
-                // The use of TMP in a shared borrow does not
-                // count as an actual activation.
-                PlaceContext::NonMutatingUse(NonMutatingUseContext::SharedBorrow(..)) |
-                PlaceContext::NonMutatingUse(NonMutatingUseContext::ShallowBorrow(..)) =>
-                    TwoPhaseActivation::NotActivated,
-                _ => {
-                    // Double check: This borrow is indeed a two-phase borrow (that is,
-                    // we are 'transitioning' from `NotActivated` to `ActivatedAt`) and
-                    // we've not found any other activations (checked above).
-                    assert_eq!(
-                        borrow_data.activation_location,
-                        TwoPhaseActivation::NotActivated,
-                        "never found an activation for this borrow!",
-                    );
+            // Otherwise, this is the unique later use that we expect.
+            // Double check: This borrow is indeed a two-phase borrow (that is,
+            // we are 'transitioning' from `NotActivated` to `ActivatedAt`) and
+            // we've not found any other activations (checked above).
+            assert_eq!(
+                borrow_data.activation_location,
+                TwoPhaseActivation::NotActivated,
+                "never found an activation for this borrow!",
+            );
+            self.activation_map
+                .entry(location)
+                .or_default()
+                .push(borrow_index);
 
-                    self.activation_map
-                        .entry(location)
-                        .or_default()
-                        .push(borrow_index);
-                    TwoPhaseActivation::ActivatedAt(location)
-                }
-            };
+            borrow_data.activation_location = TwoPhaseActivation::ActivatedAt(location);
         }
     }
 
@@ -345,7 +333,7 @@ impl<'a, 'gcx, 'tcx> GatherBorrows<'a, 'gcx, 'tcx> {
         //    TEMP = &foo
         //
         // so extract `temp`.
-        let temp = if let &mir::Place::Local(temp) = assigned_place {
+        let temp = if let &mir::Place::Base(mir::PlaceBase::Local(temp)) = assigned_place {
             temp
         } else {
             span_bug!(

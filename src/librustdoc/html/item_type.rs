@@ -2,7 +2,7 @@
 
 use std::fmt;
 use syntax::ext::base::MacroKind;
-use clean;
+use crate::clean;
 
 /// Item type. Corresponds to `clean::ItemEnum` variants.
 ///
@@ -15,7 +15,7 @@ use clean;
 /// module headings. If you are adding to this enum and want to ensure that the sidebar also prints
 /// a heading, edit the listing in `html/render.rs`, function `sidebar_module`. This uses an
 /// ordering based on a helper function inside `item_module`, in the same file.
-#[derive(Copy, PartialEq, Clone, Debug)]
+#[derive(Copy, PartialEq, Eq, Clone, Debug, PartialOrd, Ord)]
 pub enum ItemType {
     Module          = 0,
     ExternCrate     = 1,
@@ -189,7 +189,7 @@ impl ItemType {
 }
 
 impl fmt::Display for ItemType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.css_class().fmt(f)
     }
 }
@@ -211,7 +211,7 @@ impl NameSpace {
 }
 
 impl fmt::Display for NameSpace {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.to_static_str().fmt(f)
     }
 }

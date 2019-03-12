@@ -1260,7 +1260,7 @@ impl<T> Vec<T> {
     /// This method uses a closure to create new values on every push. If
     /// you'd rather [`Clone`] a given value, use [`resize`]. If you want
     /// to use the [`Default`] trait to generate values, you can pass
-    /// [`Default::default()`] as the second argument..
+    /// [`Default::default()`] as the second argument.
     ///
     /// # Examples
     ///
@@ -1365,6 +1365,7 @@ impl<T: Default> Vec<T> {
     /// # Examples
     ///
     /// ```
+    /// # #![allow(deprecated)]
     /// #![feature(vec_resize_default)]
     ///
     /// let mut vec = vec![1, 2, 3];
@@ -1381,6 +1382,9 @@ impl<T: Default> Vec<T> {
     /// [`Default`]: ../../std/default/trait.Default.html
     /// [`Clone`]: ../../std/clone/trait.Clone.html
     #[unstable(feature = "vec_resize_default", issue = "41758")]
+    #[rustc_deprecated(reason = "This is moving towards being removed in favor \
+        of `.resize_with(Default::default)`.  If you disagree, please comment \
+        in the tracking issue.", since = "1.33.0")]
     pub fn resize_default(&mut self, new_len: usize) {
         let len = self.len();
 
@@ -1606,6 +1610,7 @@ impl_is_zero!(u64, |x| x == 0);
 impl_is_zero!(u128, |x| x == 0);
 impl_is_zero!(usize, |x| x == 0);
 
+impl_is_zero!(bool, |x| x == false);
 impl_is_zero!(char, |x| x == '\0');
 
 impl_is_zero!(f32, |x: f32| x.to_bits() == 0);
@@ -2460,6 +2465,25 @@ impl<T: fmt::Debug> fmt::Debug for Drain<'_, T> {
         f.debug_tuple("Drain")
          .field(&self.iter.as_slice())
          .finish()
+    }
+}
+
+impl<'a, T> Drain<'a, T> {
+    /// Returns the remaining items of this iterator as a slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![feature(vec_drain_as_slice)]
+    /// let mut vec = vec!['a', 'b', 'c'];
+    /// let mut drain = vec.drain(..);
+    /// assert_eq!(drain.as_slice(), &['a', 'b', 'c']);
+    /// let _ = drain.next().unwrap();
+    /// assert_eq!(drain.as_slice(), &['b', 'c']);
+    /// ```
+    #[unstable(feature = "vec_drain_as_slice", reason = "recently added", issue = "58957")]
+    pub fn as_slice(&self) -> &[T] {
+        self.iter.as_slice()
     }
 }
 

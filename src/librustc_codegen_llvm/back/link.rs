@@ -24,6 +24,7 @@ use rustc::hir::def_id::CrateNum;
 use tempfile::{Builder as TempFileBuilder, TempDir};
 use rustc_target::spec::{PanicStrategy, RelroLevel, LinkerFlavor};
 use rustc_data_structures::fx::FxHashSet;
+use rustc_yk_sections::with_yk_debug_sections;
 
 use std::ascii;
 use std::char;
@@ -705,7 +706,6 @@ fn link_natively(sess: &Session,
     }
 
     if sess.opts.target_triple.triple() == "wasm32-unknown-unknown" {
-        wasm::rewrite_imports(&out_filename, &codegen_results.crate_info.wasm_imports);
         wasm::add_producer_section(
             &out_filename,
             &sess.edition().to_string(),
@@ -815,7 +815,7 @@ fn exec_linker(sess: &Session, cmd: &mut Command, out_filename: &Path, tmpdir: &
     }
 
     impl<'a> fmt::Display for Escape<'a> {
-        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             if self.is_like_msvc {
                 // This is "documented" at
                 // https://msdn.microsoft.com/en-us/library/4xdcbak7.aspx

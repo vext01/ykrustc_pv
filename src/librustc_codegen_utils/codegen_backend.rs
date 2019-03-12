@@ -21,7 +21,8 @@ use flate2::write::DeflateEncoder;
 
 use syntax::symbol::Symbol;
 use rustc::hir::def_id::LOCAL_CRATE;
-use rustc::session::{Session, CompileIncomplete};
+use rustc::session::Session;
+use rustc::util::common::ErrorReported;
 use rustc::session::config::{CrateType, OutputFilenames, PrintRequest};
 use rustc::ty::TyCtxt;
 use rustc::ty::query::Providers;
@@ -63,7 +64,7 @@ pub trait CodegenBackend {
         sess: &Session,
         dep_graph: &DepGraph,
         outputs: &OutputFilenames,
-    ) -> Result<(), CompileIncomplete>;
+    ) -> Result<(), ErrorReported>;
 }
 
 pub struct NoLlvmMetadataLoader;
@@ -135,7 +136,6 @@ impl CodegenBackend for MetadataOnlyCodegenBackend {
         crate::symbol_names_test::report_symbol_names(tcx);
         rustc_incremental::assert_dep_graph(tcx);
         rustc_incremental::assert_module_sources::assert_module_sources(tcx);
-
         let (monos, _inline_map) = collector::collect_crate_mono_items(
             tcx, collector::MonoItemCollectionMode::Eager);
 
@@ -177,7 +177,7 @@ impl CodegenBackend for MetadataOnlyCodegenBackend {
         sess: &Session,
         _dep_graph: &DepGraph,
         outputs: &OutputFilenames,
-    ) -> Result<(), CompileIncomplete> {
+    ) -> Result<(), ErrorReported> {
         let ongoing_codegen = ongoing_codegen.downcast::<OngoingCodegen>()
             .expect("Expected MetadataOnlyCodegenBackend's OngoingCodegen, found Box<dyn Any>");
         for &crate_type in sess.opts.crate_types.iter() {

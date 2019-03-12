@@ -9,12 +9,6 @@ use crate::ThinVec;
 use rustc_target::spec::abi::Abi;
 use syntax_pos::{Pos, Span, DUMMY_SP};
 
-// Transitional re-exports so qquote can find the paths it is looking for
-mod syntax {
-    pub use crate::ext;
-    pub use crate::parse;
-}
-
 pub trait AstBuilder {
     // paths
     fn path(&self, span: Span, strs: Vec<ast::Ident> ) -> ast::Path;
@@ -991,7 +985,7 @@ impl<'a> AstBuilder for ExtCtxt<'a> {
         P(ast::FnDecl {
             inputs,
             output,
-            variadic: false
+            c_variadic: false
         })
     }
 
@@ -1023,7 +1017,7 @@ impl<'a> AstBuilder for ExtCtxt<'a> {
                   ast::ItemKind::Fn(self.fn_decl(inputs, ast::FunctionRetTy::Ty(output)),
                               ast::FnHeader {
                                   unsafety: ast::Unsafety::Normal,
-                                  asyncness: ast::IsAsync::NotAsync,
+                                  asyncness: dummy_spanned(ast::IsAsync::NotAsync),
                                   constness: dummy_spanned(ast::Constness::NotConst),
                                   abi: Abi::Rust,
                               },

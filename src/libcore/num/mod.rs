@@ -2,7 +2,7 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use convert::TryFrom;
+use convert::{TryFrom, Infallible};
 use fmt;
 use intrinsics;
 use mem;
@@ -346,7 +346,7 @@ $EndFeature, "
             concat!("Shifts the bits to the left by a specified amount, `n`,
 wrapping the truncated bits to the end of the resulting integer.
 
-Please note this isn't the same operation as `<<`!
+Please note this isn't the same operation as the `<<` shifting operator!
 
 # Examples
 
@@ -370,7 +370,7 @@ assert_eq!(n.rotate_left(", $rot, "), m);
 wrapping the truncated bits to the beginning of the resulting
 integer.
 
-Please note this isn't the same operation as `>>`!
+Please note this isn't the same operation as the `>>` shifting operator!
 
 # Examples
 
@@ -880,68 +880,15 @@ assert_eq!(", stringify!($SelfT), "::max_value().saturating_add(100), ", stringi
 "::max_value());",
 $EndFeature, "
 ```"),
-            #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
-            #[cfg(stage0)]
-            pub fn saturating_add(self, rhs: Self) -> Self {
-                match self.checked_add(rhs) {
-                    Some(x) => x,
-                    None if rhs >= 0 => Self::max_value(),
-                    None => Self::min_value(),
-                }
-            }
-
-        }
-
-        doc_comment! {
-            concat!("Saturating integer addition. Computes `self + rhs`, saturating at the numeric
-bounds instead of overflowing.
-
-# Examples
-
-Basic usage:
-
-```
-", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_add(1), 101);
-assert_eq!(", stringify!($SelfT), "::max_value().saturating_add(100), ", stringify!($SelfT),
-"::max_value());",
-$EndFeature, "
-```"),
 
             #[stable(feature = "rust1", since = "1.0.0")]
             #[rustc_const_unstable(feature = "const_saturating_int_methods")]
             #[inline]
-            #[cfg(not(stage0))]
             pub const fn saturating_add(self, rhs: Self) -> Self {
                 intrinsics::saturating_add(self, rhs)
             }
         }
 
-        doc_comment! {
-            concat!("Saturating integer subtraction. Computes `self - rhs`, saturating at the
-numeric bounds instead of overflowing.
-
-# Examples
-
-Basic usage:
-
-```
-", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_sub(127), -27);
-assert_eq!(", stringify!($SelfT), "::min_value().saturating_sub(100), ", stringify!($SelfT),
-"::min_value());",
-$EndFeature, "
-```"),
-            #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
-            #[cfg(stage0)]
-            pub fn saturating_sub(self, rhs: Self) -> Self {
-                match self.checked_sub(rhs) {
-                    Some(x) => x,
-                    None if rhs >= 0 => Self::min_value(),
-                    None => Self::max_value(),
-                }
-            }
-        }
 
         doc_comment! {
             concat!("Saturating integer subtraction. Computes `self - rhs`, saturating at the
@@ -960,7 +907,6 @@ $EndFeature, "
             #[stable(feature = "rust1", since = "1.0.0")]
             #[rustc_const_unstable(feature = "const_saturating_int_methods")]
             #[inline]
-            #[cfg(not(stage0))]
             pub const fn saturating_sub(self, rhs: Self) -> Self {
                 intrinsics::saturating_sub(self, rhs)
             }
@@ -2000,7 +1946,6 @@ assert_eq!(value, ", $swap_op, ");
 When starting from a slice rather than an array, fallible conversion APIs can be used:
 
 ```
-#![feature(try_from)]
 use std::convert::TryInto;
 
 fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
@@ -2032,7 +1977,6 @@ assert_eq!(value, ", $swap_op, ");
 When starting from a slice rather than an array, fallible conversion APIs can be used:
 
 ```
-#![feature(try_from)]
 use std::convert::TryInto;
 
 fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
@@ -2074,7 +2018,6 @@ assert_eq!(value, ", $swap_op, ");
 When starting from a slice rather than an array, fallible conversion APIs can be used:
 
 ```
-#![feature(try_from)]
 use std::convert::TryInto;
 
 fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
@@ -2303,7 +2246,7 @@ assert_eq!(n.trailing_zeros(), 3);", $EndFeature, "
             concat!("Shifts the bits to the left by a specified amount, `n`,
 wrapping the truncated bits to the end of the resulting integer.
 
-Please note this isn't the same operation as `<<`!
+Please note this isn't the same operation as the `<<` shifting operator!
 
 # Examples
 
@@ -2327,7 +2270,7 @@ assert_eq!(n.rotate_left(", $rot, "), m);
 wrapping the truncated bits to the beginning of the resulting
 integer.
 
-Please note this isn't the same operation as `>>`!
+Please note this isn't the same operation as the `>>` shifting operator!
 
 # Examples
 
@@ -2787,34 +2730,10 @@ Basic usage:
 ", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_add(1), 101);
 assert_eq!(200u8.saturating_add(127), 255);", $EndFeature, "
 ```"),
-            #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
-            #[cfg(stage0)]
-            pub fn saturating_add(self, rhs: Self) -> Self {
-                match self.checked_add(rhs) {
-                    Some(x) => x,
-                    None => Self::max_value(),
-                }
-            }
-        }
-
-        doc_comment! {
-            concat!("Saturating integer addition. Computes `self + rhs`, saturating at
-the numeric bounds instead of overflowing.
-
-# Examples
-
-Basic usage:
-
-```
-", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_add(1), 101);
-assert_eq!(200u8.saturating_add(127), 255);", $EndFeature, "
-```"),
 
             #[stable(feature = "rust1", since = "1.0.0")]
             #[rustc_const_unstable(feature = "const_saturating_int_methods")]
             #[inline]
-            #[cfg(not(stage0))]
             pub const fn saturating_add(self, rhs: Self) -> Self {
                 intrinsics::saturating_add(self, rhs)
             }
@@ -2833,32 +2752,8 @@ Basic usage:
 assert_eq!(13", stringify!($SelfT), ".saturating_sub(127), 0);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
-            #[cfg(stage0)]
-            pub fn saturating_sub(self, rhs: Self) -> Self {
-                match self.checked_sub(rhs) {
-                    Some(x) => x,
-                    None => Self::min_value(),
-                }
-            }
-        }
-
-        doc_comment! {
-            concat!("Saturating integer subtraction. Computes `self - rhs`, saturating
-at the numeric bounds instead of overflowing.
-
-# Examples
-
-Basic usage:
-
-```
-", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_sub(27), 73);
-assert_eq!(13", stringify!($SelfT), ".saturating_sub(127), 0);", $EndFeature, "
-```"),
-            #[stable(feature = "rust1", since = "1.0.0")]
             #[rustc_const_unstable(feature = "const_saturating_int_methods")]
             #[inline]
-            #[cfg(not(stage0))]
             pub const fn saturating_sub(self, rhs: Self) -> Self {
                 intrinsics::saturating_sub(self, rhs)
             }
@@ -3767,7 +3662,6 @@ assert_eq!(value, ", $swap_op, ");
 When starting from a slice rather than an array, fallible conversion APIs can be used:
 
 ```
-#![feature(try_from)]
 use std::convert::TryInto;
 
 fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
@@ -3799,7 +3693,6 @@ assert_eq!(value, ", $swap_op, ");
 When starting from a slice rather than an array, fallible conversion APIs can be used:
 
 ```
-#![feature(try_from)]
 use std::convert::TryInto;
 
 fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
@@ -3841,7 +3734,6 @@ assert_eq!(value, ", $swap_op, ");
 When starting from a slice rather than an array, fallible conversion APIs can be used:
 
 ```
-#![feature(try_from)]
 use std::convert::TryInto;
 
 fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
@@ -4504,7 +4396,7 @@ macro_rules! from_str_radix_int_impl {
 from_str_radix_int_impl! { isize i8 i16 i32 i64 i128 usize u8 u16 u32 u64 u128 }
 
 /// The error type returned when a checked integral type conversion fails.
-#[unstable(feature = "try_from", issue = "33417")]
+#[stable(feature = "try_from", since = "1.34.0")]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TryFromIntError(());
 
@@ -4519,24 +4411,34 @@ impl TryFromIntError {
     }
 }
 
-#[unstable(feature = "try_from", issue = "33417")]
+#[stable(feature = "try_from", since = "1.34.0")]
 impl fmt::Display for TryFromIntError {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         self.__description().fmt(fmt)
     }
 }
 
-#[unstable(feature = "try_from", issue = "33417")]
+#[stable(feature = "try_from", since = "1.34.0")]
+impl From<Infallible> for TryFromIntError {
+    fn from(x: Infallible) -> TryFromIntError {
+        match x {}
+    }
+}
+
+#[unstable(feature = "never_type", issue = "35121")]
 impl From<!> for TryFromIntError {
     fn from(never: !) -> TryFromIntError {
-        never
+        // Match rather than coerce to make sure that code like
+        // `From<Infallible> for TryFromIntError` above will keep working
+        // when `Infallible` becomes an alias to `!`.
+        match never {}
     }
 }
 
 // no possible bounds violation
 macro_rules! try_from_unbounded {
     ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
+        #[stable(feature = "try_from", since = "1.34.0")]
         impl TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
@@ -4551,7 +4453,7 @@ macro_rules! try_from_unbounded {
 // only negative bounds
 macro_rules! try_from_lower_bounded {
     ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
+        #[stable(feature = "try_from", since = "1.34.0")]
         impl TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
@@ -4570,7 +4472,7 @@ macro_rules! try_from_lower_bounded {
 // unsigned to signed (only positive bound)
 macro_rules! try_from_upper_bounded {
     ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
+        #[stable(feature = "try_from", since = "1.34.0")]
         impl TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
@@ -4589,7 +4491,7 @@ macro_rules! try_from_upper_bounded {
 // all other cases
 macro_rules! try_from_both_bounded {
     ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
+        #[stable(feature = "try_from", since = "1.34.0")]
         impl TryFrom<$source> for $target {
             type Error = TryFromIntError;
 
@@ -4613,7 +4515,7 @@ macro_rules! rev {
     )*}
 }
 
-/// intra-sign conversions
+// intra-sign conversions
 try_from_upper_bounded!(u16, u8);
 try_from_upper_bounded!(u32, u16, u8);
 try_from_upper_bounded!(u64, u32, u16, u8);

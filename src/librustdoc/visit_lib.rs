@@ -6,14 +6,14 @@ use rustc::util::nodemap::FxHashSet;
 
 use std::cell::RefMut;
 
-use clean::{AttributesExt, NestedAttributesExt};
+use crate::clean::{AttributesExt, NestedAttributesExt};
 
 // FIXME: this may not be exhaustive, but is sufficient for rustdocs current uses
 
 /// Similar to `librustc_privacy::EmbargoVisitor`, but also takes
 /// specific rustdoc annotations into account (i.e., `doc(hidden)`)
-pub struct LibEmbargoVisitor<'a, 'tcx: 'a, 'rcx: 'a> {
-    cx: &'a ::core::DocContext<'a, 'tcx, 'rcx>,
+pub struct LibEmbargoVisitor<'a, 'tcx> {
+    cx: &'a crate::core::DocContext<'tcx>,
     // Accessibility levels for reachable nodes
     access_levels: RefMut<'a, AccessLevels<DefId>>,
     // Previous accessibility level, None means unreachable
@@ -22,10 +22,10 @@ pub struct LibEmbargoVisitor<'a, 'tcx: 'a, 'rcx: 'a> {
     visited_mods: FxHashSet<DefId>,
 }
 
-impl<'a, 'tcx, 'rcx> LibEmbargoVisitor<'a, 'tcx, 'rcx> {
+impl<'a, 'tcx> LibEmbargoVisitor<'a, 'tcx> {
     pub fn new(
-        cx: &'a ::core::DocContext<'a, 'tcx, 'rcx>
-    ) -> LibEmbargoVisitor<'a, 'tcx, 'rcx> {
+        cx: &'a crate::core::DocContext<'tcx>
+    ) -> LibEmbargoVisitor<'a, 'tcx> {
         LibEmbargoVisitor {
             cx,
             access_levels: RefMut::map(cx.renderinfo.borrow_mut(), |ri| &mut ri.access_levels),

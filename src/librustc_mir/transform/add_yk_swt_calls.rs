@@ -9,7 +9,7 @@
 
 use rustc::ty::{self, TyCtxt, List};
 use rustc::mir::{Operand, LocalDecl, Place, SourceInfo, BasicBlock, Local, BasicBlockData,
-    TerminatorKind, Terminator, OUTERMOST_SOURCE_SCOPE, Constant, Mir};
+    TerminatorKind, Terminator, OUTERMOST_SOURCE_SCOPE, Constant, Mir, PlaceBase};
 use rustc_data_structures::indexed_vec::Idx;
 use syntax_pos::DUMMY_SP;
 use syntax::attr;
@@ -73,7 +73,8 @@ impl MirPass for AddYkSWTCalls {
 
             // Prepare to call the recorder function.
             let ret_val = LocalDecl::new_temp(unit_ty, DUMMY_SP);
-            let ret_place = Place::Local(Local::new(num_orig_local_decls + new_local_decls.len()));
+            let ret_place = Place::Base(PlaceBase::Local(
+                    Local::new(num_orig_local_decls + new_local_decls.len())));
             new_local_decls.push(ret_val);
 
             let crate_hash_const = tcx.mk_lazy_const(

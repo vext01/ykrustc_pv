@@ -1,10 +1,11 @@
 use synstructure;
-use syn::{self, Meta, NestedMeta};
-use proc_macro2::{self, Ident, Span};
+use syn::{self, Meta, NestedMeta, parse_quote};
+use proc_macro2::{self, Ident};
+use quote::quote;
 
 struct Attributes {
     ignore: bool,
-    project: Option<String>,
+    project: Option<Ident>,
 }
 
 fn parse_attributes(field: &syn::Field) -> Attributes {
@@ -29,7 +30,7 @@ fn parse_attributes(field: &syn::Field) -> Attributes {
                             if let Meta::List(list) = meta {
                                 if let Some(nested) = list.nested.iter().next() {
                                     if let NestedMeta::Meta(meta) = nested {
-                                        attrs.project = Some(meta.name().to_string());
+                                        attrs.project = Some(meta.name());
                                         any_attr = true;
                                     }
                                 }
@@ -46,7 +47,7 @@ fn parse_attributes(field: &syn::Field) -> Attributes {
     attrs
 }
 
-pub fn hash_stable_derive(mut s: synstructure::Structure) -> proc_macro2::TokenStream {
+pub fn hash_stable_derive(mut s: synstructure::Structure<'_>) -> proc_macro2::TokenStream {
     let generic: syn::GenericParam = parse_quote!('__ctx);
     s.add_bounds(synstructure::AddBounds::Generics);
     s.add_impl_generic(generic);
@@ -55,7 +56,6 @@ pub fn hash_stable_derive(mut s: synstructure::Structure) -> proc_macro2::TokenS
         if attrs.ignore {
              quote!{}
         } else if let Some(project) = attrs.project {
-            let project = Ident::new(&project, Span::call_site());
             quote!{
                 &#bi.#project.hash_stable(__hcx, __hasher);
             }

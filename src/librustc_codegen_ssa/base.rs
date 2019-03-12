@@ -16,7 +16,7 @@
 use crate::{ModuleCodegen, ModuleKind, CachedModuleCodegen};
 
 use rustc::dep_graph::cgu_reuse_tracker::CguReuse;
-use rustc::hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
+use rustc::hir::def_id::{DefId, LOCAL_CRATE};
 use rustc::middle::lang_items::StartFnLangItem;
 use rustc::middle::weak_lang_items;
 use rustc::mir::mono::{Stats, CodegenUnitNameBuilder};
@@ -371,7 +371,7 @@ pub fn from_immediate<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>>(
 pub fn to_immediate<'a, 'tcx: 'a, Bx: BuilderMethods<'a, 'tcx>>(
     bx: &mut Bx,
     val: Bx::Value,
-    layout: layout::TyLayout,
+    layout: layout::TyLayout<'_>,
 ) -> Bx::Value {
     if let layout::Abi::Scalar(ref scalar) = layout.abi {
         return to_immediate_scalar(bx, val, scalar);
@@ -552,9 +552,9 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
                                                             &["crate"],
                                                             Some("metadata")).as_str()
                                                                              .to_string();
-    let metadata_llvm_module = backend.new_metadata(tcx, &metadata_cgu_name);
+    let mut metadata_llvm_module = backend.new_metadata(tcx, &metadata_cgu_name);
     let metadata = time(tcx.sess, "write metadata", || {
-        backend.write_metadata(tcx, &metadata_llvm_module)
+        backend.write_metadata(tcx, &mut metadata_llvm_module)
     });
     tcx.sess.profiler(|p| p.end_activity(ProfileCategory::Codegen));
 
@@ -637,9 +637,9 @@ pub fn codegen_crate<B: ExtraBackendMethods>(
                                                        &["crate"],
                                                        Some("allocator")).as_str()
                                                                          .to_string();
-        let modules = backend.new_metadata(tcx, &llmod_id);
+        let mut modules = backend.new_metadata(tcx, &llmod_id);
         time(tcx.sess, "write allocator module", || {
-            backend.codegen_allocator(tcx, &modules, kind)
+            backend.codegen_allocator(tcx, &mut modules, kind)
         });
 
         Some(ModuleCodegen {
@@ -803,7 +803,7 @@ fn assert_and_save_dep_graph<'ll, 'tcx>(tcx: TyCtxt<'ll, 'tcx, 'tcx>) {
 }
 
 impl CrateInfo {
-    pub fn new(tcx: TyCtxt) -> CrateInfo {
+    pub fn new(tcx: TyCtxt<'_, '_, '_>) -> CrateInfo {
         let mut info = CrateInfo {
             panic_runtime: None,
             compiler_builtins: None,
@@ -817,20 +817,10 @@ impl CrateInfo {
             used_crates_dynamic: cstore::used_crates(tcx, LinkagePreference::RequireDynamic),
             used_crates_static: cstore::used_crates(tcx, LinkagePreference::RequireStatic),
             used_crate_source: Default::default(),
-            wasm_imports: Default::default(),
             lang_item_to_crate: Default::default(),
             missing_lang_items: Default::default(),
         };
         let lang_items = tcx.lang_items();
-
-        let load_wasm_items = tcx.sess.crate_types.borrow()
-            .iter()
-            .any(|c| *c != config::CrateType::Rlib) &&
-            tcx.sess.opts.target_triple.triple() == "wasm32-unknown-unknown";
-
-        if load_wasm_items {
-            info.load_wasm_imports(tcx, LOCAL_CRATE);
-        }
 
         let crates = tcx.crates();
 
@@ -859,9 +849,6 @@ impl CrateInfo {
             if tcx.is_no_builtins(cnum) {
                 info.is_no_builtins.insert(cnum);
             }
-            if load_wasm_items {
-                info.load_wasm_imports(tcx, cnum);
-            }
             let missing = tcx.missing_lang_items(cnum);
             for &item in missing.iter() {
                 if let Ok(id) = lang_items.require(item) {
@@ -880,24 +867,15 @@ impl CrateInfo {
 
         return info
     }
-
-    fn load_wasm_imports(&mut self, tcx: TyCtxt, cnum: CrateNum) {
-        self.wasm_imports.extend(tcx.wasm_import_module_map(cnum).iter().map(|(&id, module)| {
-            let instance = Instance::mono(tcx, id);
-            let import_name = tcx.symbol_name(instance);
-
-            (import_name.to_string(), module.clone())
-        }));
-    }
 }
 
-fn is_codegened_item(tcx: TyCtxt, id: DefId) -> bool {
+fn is_codegened_item(tcx: TyCtxt<'_, '_, '_>, id: DefId) -> bool {
     let (all_mono_items, _) =
         tcx.collect_and_partition_mono_items(LOCAL_CRATE);
     all_mono_items.contains(&id)
 }
 
-pub fn provide_both(providers: &mut Providers) {
+pub fn provide_both(providers: &mut Providers<'_>) {
     providers.backend_optimization_level = |tcx, cratenum| {
         let for_speed = match tcx.sess.opts.optimize {
             // If globally no optimisation is done, #[optimize] has no effect.

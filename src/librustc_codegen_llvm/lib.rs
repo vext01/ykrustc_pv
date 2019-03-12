@@ -23,7 +23,6 @@
 #![feature(static_nobundle)]
 #![deny(rust_2018_idioms)]
 #![allow(explicit_outlives_requirements)]
-#![allow(elided_lifetimes_in_paths)]
 
 use back::write::create_target_machine;
 use syntax_pos::symbol::Symbol;
@@ -64,12 +63,13 @@ use std::sync::{mpsc, Arc};
 use rustc::dep_graph::DepGraph;
 use rustc::middle::allocator::AllocatorKind;
 use rustc::middle::cstore::{EncodedMetadata, MetadataLoader};
-use rustc::session::{Session, CompileIncomplete};
+use rustc::session::Session;
 use rustc::session::config::{OutputFilenames, OutputType, PrintRequest, OptLevel};
 use rustc::ty::{self, TyCtxt};
 use rustc::util::nodemap::DefIdSet;
 use rustc::util::time_graph;
 use rustc::util::profiling::ProfileCategory;
+use rustc::util::common::ErrorReported;
 use rustc_mir::monomorphize;
 use rustc_codegen_ssa::ModuleCodegen;
 use rustc_codegen_utils::codegen_backend::CodegenBackend;
@@ -115,17 +115,22 @@ mod va_arg;
 pub struct LlvmCodegenBackend(());
 
 impl ExtraBackendMethods for LlvmCodegenBackend {
-    fn new_metadata(&self, tcx: TyCtxt, mod_name: &str) -> ModuleLlvm {
+    fn new_metadata(&self, tcx: TyCtxt<'_, '_, '_>, mod_name: &str) -> ModuleLlvm {
         ModuleLlvm::new(tcx, mod_name)
     }
     fn write_metadata<'b, 'gcx>(
         &self,
         tcx: TyCtxt<'b, 'gcx, 'gcx>,
-        metadata: &ModuleLlvm
+        metadata: &mut ModuleLlvm
     ) -> EncodedMetadata {
         base::write_metadata(tcx, metadata)
     }
-    fn codegen_allocator(&self, tcx: TyCtxt, mods: &ModuleLlvm, kind: AllocatorKind) {
+    fn codegen_allocator<'b, 'gcx>(
+        &self,
+        tcx: TyCtxt<'b, 'gcx, 'gcx>,
+        mods: &mut ModuleLlvm,
+        kind: AllocatorKind
+    ) {
         unsafe { allocator::codegen(tcx, mods, kind) }
     }
     fn compile_codegen_unit<'a, 'tcx: 'a>(
@@ -281,14 +286,14 @@ impl CodegenBackend for LlvmCodegenBackend {
         box metadata::LlvmMetadataLoader
     }
 
-    fn provide(&self, providers: &mut ty::query::Providers) {
+    fn provide(&self, providers: &mut ty::query::Providers<'_>) {
         rustc_codegen_utils::symbol_names::provide(providers);
         rustc_codegen_ssa::back::symbol_export::provide(providers);
         rustc_codegen_ssa::base::provide_both(providers);
         attributes::provide(providers);
     }
 
-    fn provide_extern(&self, providers: &mut ty::query::Providers) {
+    fn provide_extern(&self, providers: &mut ty::query::Providers<'_>) {
         rustc_codegen_ssa::back::symbol_export::provide_extern(providers);
         rustc_codegen_ssa::base::provide_both(providers);
         attributes::provide_extern(providers);
@@ -310,7 +315,7 @@ impl CodegenBackend for LlvmCodegenBackend {
         sess: &Session,
         dep_graph: &DepGraph,
         outputs: &OutputFilenames,
-    ) -> Result<(), CompileIncomplete>{
+    ) -> Result<(), ErrorReported>{
         use rustc::util::common::time;
         let (codegen_results, work_products) =
             ongoing_codegen.downcast::
@@ -365,7 +370,7 @@ unsafe impl Send for ModuleLlvm { }
 unsafe impl Sync for ModuleLlvm { }
 
 impl ModuleLlvm {
-    fn new(tcx: TyCtxt, mod_name: &str) -> Self {
+    fn new(tcx: TyCtxt<'_, '_, '_>, mod_name: &str) -> Self {
         unsafe {
             let llcx = llvm::LLVMRustContextCreate(tcx.sess.fewer_names());
             let llmod_raw = context::create_module(tcx, llcx, mod_name) as *const _;

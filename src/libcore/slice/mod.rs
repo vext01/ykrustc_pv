@@ -2158,7 +2158,7 @@ impl<T> [T] {
     /// This method has no purpose when either input element `T` or output element `U` are
     /// zero-sized and will return the original slice without splitting anything.
     ///
-    /// # Unsafety
+    /// # Safety
     ///
     /// This method is essentially a `transmute` with respect to the elements in the returned
     /// middle slice, so all the usual caveats pertaining to `transmute::<T, U>` also apply here.
@@ -2211,7 +2211,7 @@ impl<T> [T] {
     /// This method has no purpose when either input element `T` or output element `U` are
     /// zero-sized and will return the original slice without splitting anything.
     ///
-    /// # Unsafety
+    /// # Safety
     ///
     /// This method is essentially a `transmute` with respect to the elements in the returned
     /// middle slice, so all the usual caveats pertaining to `transmute::<T, U>` also apply here.
@@ -3287,6 +3287,34 @@ impl<'a, T> IterMut<'a, T> {
     #[stable(feature = "iter_to_slice", since = "1.4.0")]
     pub fn into_slice(self) -> &'a mut [T] {
         unsafe { from_raw_parts_mut(self.ptr, len!(self)) }
+    }
+
+    /// Views the underlying data as a subslice of the original data.
+    ///
+    /// To avoid creating `&mut [T]` references that alias, the returned slice
+    /// borrows its lifetime from the iterator the method is applied on.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// # #![feature(slice_iter_mut_as_slice)]
+    /// let mut slice: &mut [usize] = &mut [1, 2, 3];
+    ///
+    /// // First, we get the iterator:
+    /// let mut iter = slice.iter_mut();
+    /// // So if we check what the `as_slice` method returns here, we have "[1, 2, 3]":
+    /// assert_eq!(iter.as_slice(), &[1, 2, 3]);
+    ///
+    /// // Next, we move to the second element of the slice:
+    /// iter.next();
+    /// // Now `as_slice` returns "[2, 3]":
+    /// assert_eq!(iter.as_slice(), &[2, 3]);
+    /// ```
+    #[unstable(feature = "slice_iter_mut_as_slice", reason = "recently added", issue = "58957")]
+    pub fn as_slice(&self) -> &[T] {
+        self.make_slice()
     }
 }
 

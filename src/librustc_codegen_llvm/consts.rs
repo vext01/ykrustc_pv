@@ -71,7 +71,7 @@ pub fn codegen_static_initializer(
     let static_ = cx.tcx.const_eval(param_env.and(cid))?;
 
     let alloc = match static_.val {
-        ConstValue::ByRef(_, alloc, n) if n.bytes() == 0 => alloc,
+        ConstValue::ByRef(ptr, alloc) if ptr.offset.bytes() == 0 => alloc,
         _ => bug!("static const eval returned {:#?}", static_),
     };
     Ok((const_alloc_to_llvm(cx, alloc), alloc))
@@ -213,10 +213,10 @@ impl CodegenCx<'ll, 'tcx> {
 
         debug!("get_static: sym={} instance={:?}", sym, instance);
 
-        let g = if let Some(id) = self.tcx.hir().as_local_node_id(def_id) {
+        let g = if let Some(id) = self.tcx.hir().as_local_hir_id(def_id) {
 
             let llty = self.layout_of(ty).llvm_type(self);
-            let (g, attrs) = match self.tcx.hir().get(id) {
+            let (g, attrs) = match self.tcx.hir().get_by_hir_id(id) {
                 Node::Item(&hir::Item {
                     ref attrs, span, node: hir::ItemKind::Static(..), ..
                 }) => {

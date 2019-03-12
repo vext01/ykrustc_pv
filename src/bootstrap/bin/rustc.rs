@@ -17,8 +17,6 @@
 
 #![deny(warnings)]
 
-extern crate bootstrap;
-
 use std::env;
 use std::ffi::OsString;
 use std::io;
@@ -108,6 +106,8 @@ fn main() {
         // The stage0 compiler has a special sysroot distinct from what we
         // actually downloaded, so we just always pass the `--sysroot` option.
         cmd.arg("--sysroot").arg(&sysroot);
+
+        cmd.arg("-Zexternal-macro-backtrace");
 
         // Link crates to the proc macro crate for the target, but use a host proc macro crate
         // to actually run the macros

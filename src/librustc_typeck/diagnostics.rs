@@ -423,7 +423,7 @@ impl Foo for Bar {
 
 E0049: r##"
 This error indicates that an attempted implementation of a trait method
-has the wrong number of type parameters.
+has the wrong number of type or const parameters.
 
 For example, the trait below has a method `foo` with a type parameter `T`,
 but the implementation of `foo` for the type `Bar` is missing this parameter:
@@ -1032,6 +1032,7 @@ enum NightsWatch {}
 ```
 "##,
 
+// FIXME(const_generics:docs): example of inferring const parameter.
 E0087: r##"
 #### Note: this error code is no longer emitted by the compiler.
 
@@ -1152,8 +1153,8 @@ fn main() {
 "##,
 
 E0091: r##"
-You gave an unnecessary type parameter in a type alias. Erroneous code
-example:
+You gave an unnecessary type or const parameter in a type alias. Erroneous
+code example:
 
 ```compile_fail,E0091
 type Foo<T> = u32; // error: type parameter `T` is unused
@@ -1161,7 +1162,7 @@ type Foo<T> = u32; // error: type parameter `T` is unused
 type Foo<A,B> = Box<A>; // error: type parameter `B` is unused
 ```
 
-Please check you didn't write too many type parameters. Example:
+Please check you didn't write too many parameters. Example:
 
 ```
 type Foo = u32; // ok!
@@ -2873,8 +2874,8 @@ E0370: r##"
 The maximum value of an enum was reached, so it cannot be automatically
 set in the next enum value. Erroneous code example:
 
-```compile_fail
-#[deny(overflowing_literals)]
+```compile_fail,E0370
+#[repr(i64)]
 enum Foo {
     X = 0x7fffffffffffffff,
     Y, // error: enum discriminant overflowed on value after
@@ -2887,6 +2888,7 @@ To fix this, please set manually the next enum value or put the enum variant
 with the maximum value at the end of the enum. Examples:
 
 ```
+#[repr(i64)]
 enum Foo {
     X = 0x7fffffffffffffff,
     Y = 0, // ok!
@@ -2896,6 +2898,7 @@ enum Foo {
 Or:
 
 ```
+#[repr(i64)]
 enum Foo {
     Y = 0, // ok!
     X = 0x7fffffffffffffff,
@@ -4738,4 +4741,5 @@ register_diagnostics! {
     E0698, // type inside generator must be known in this context
     E0719, // duplicate values for associated type binding
     E0722, // Malformed #[optimize] attribute
+    E0724, // `#[ffi_returns_twice]` is only allowed in foreign functions
 }

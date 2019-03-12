@@ -22,7 +22,7 @@ fn equate_intrinsic_type<'a, 'tcx>(
     inputs: Vec<Ty<'tcx>>,
     output: Ty<'tcx>,
 ) {
-    let def_id = tcx.hir().local_def_id(it.id);
+    let def_id = tcx.hir().local_def_id_from_hir_id(it.hir_id);
 
     match it.node {
         hir::ForeignItemKind::Fn(..) => {}
@@ -337,7 +337,7 @@ pub fn check_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
             "va_start" | "va_end" => {
                 match mk_va_list_ty() {
                     Some(va_list_ty) => (0, vec![va_list_ty], tcx.mk_unit()),
-                    None => bug!("va_list lang_item must be defined to use va_list intrinsics")
+                    None => bug!("`va_list` language item needed for C-variadic intrinsics")
                 }
             }
 
@@ -364,14 +364,14 @@ pub fn check_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                         };
                         (0, vec![tcx.mk_imm_ref(tcx.mk_region(env_region), va_list_ty)], ret_ty)
                     }
-                    None => bug!("va_list lang_item must be defined to use va_list intrinsics")
+                    None => bug!("`va_list` language item needed for C-variadic intrinsics")
                 }
             }
 
             "va_arg" => {
                 match mk_va_list_ty() {
                     Some(va_list_ty) => (1, vec![va_list_ty], param(0)),
-                    None => bug!("va_list lang_item must be defined to use va_list intrinsics")
+                    None => bug!("`va_list` language item needed for C-variadic intrinsics")
                 }
             }
 
@@ -410,7 +410,8 @@ pub fn check_platform_intrinsic_type<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>,
         "simd_add" | "simd_sub" | "simd_mul" | "simd_rem" |
         "simd_div" | "simd_shl" | "simd_shr" |
         "simd_and" | "simd_or" | "simd_xor" |
-        "simd_fmin" | "simd_fmax" | "simd_fpow" => {
+        "simd_fmin" | "simd_fmax" | "simd_fpow" |
+        "simd_saturating_add" | "simd_saturating_sub" => {
             (1, vec![param(0), param(0)], param(0))
         }
         "simd_fsqrt" | "simd_fsin" | "simd_fcos" | "simd_fexp" | "simd_fexp2" |

@@ -19,6 +19,7 @@ use rustc::util::time_graph::{self, TimeGraph, Timeline};
 use rustc::hir::def_id::{CrateNum, LOCAL_CRATE};
 use rustc::ty::TyCtxt;
 use rustc::util::common::{time_depth, set_time_depth, print_time_passes_entry};
+use rustc::util::profiling::SelfProfiler;
 use rustc_fs_util::link_or_copy;
 use rustc_data_structures::svh::Svh;
 use rustc_errors::{Handler, Level, DiagnosticBuilder, FatalError, DiagnosticId};
@@ -29,6 +30,7 @@ use syntax::ext::hygiene::Mark;
 use syntax_pos::MultiSpan;
 use syntax_pos::symbol::Symbol;
 use jobserver::{Client, Acquired};
+use parking_lot::Mutex as PlMutex;
 
 use std::any::Any;
 use std::fs;
@@ -201,6 +203,7 @@ pub struct CodegenContext<B: WriteBackendMethods> {
     // Resources needed when running LTO
     pub backend: B,
     pub time_passes: bool,
+    pub profiler: Option<Arc<PlMutex<SelfProfiler>>>,
     pub lto: Lto,
     pub no_landing_pads: bool,
     pub save_temps: bool,
@@ -244,7 +247,7 @@ pub struct CodegenContext<B: WriteBackendMethods> {
 
 impl<B: WriteBackendMethods> CodegenContext<B> {
     pub fn create_diag_handler(&self) -> Handler {
-        Handler::with_emitter(true, false, Box::new(self.diag_emitter.clone()))
+        Handler::with_emitter(true, None, Box::new(self.diag_emitter.clone()))
     }
 
     pub fn config(&self, kind: ModuleKind) -> &ModuleConfig {
@@ -252,6 +255,26 @@ impl<B: WriteBackendMethods> CodegenContext<B> {
             ModuleKind::Regular => &self.regular_module_config,
             ModuleKind::Metadata => &self.metadata_module_config,
             ModuleKind::Allocator => &self.allocator_module_config,
+        }
+    }
+
+    #[inline(never)]
+    #[cold]
+    fn profiler_active<F: FnOnce(&mut SelfProfiler) -> ()>(&self, f: F) {
+        match &self.profiler {
+            None => bug!("profiler_active() called but there was no profiler active"),
+            Some(profiler) => {
+                let mut p = profiler.lock();
+
+                f(&mut p);
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn profile<F: FnOnce(&mut SelfProfiler) -> ()>(&self, f: F) {
+        if unlikely!(self.profiler.is_some()) {
+            self.profiler_active(f)
         }
     }
 }
@@ -321,7 +344,7 @@ fn need_pre_lto_bitcode_for_incr_comp(sess: &Session) -> bool {
 
 pub fn start_async_codegen<B: ExtraBackendMethods>(
     backend: B,
-    tcx: TyCtxt,
+    tcx: TyCtxt<'_, '_, '_>,
     time_graph: Option<TimeGraph>,
     metadata: EncodedMetadata,
     coordinator_receive: Receiver<Box<dyn Any + Send>>,
@@ -947,7 +970,7 @@ enum MainThreadWorkerState {
 
 fn start_executing_work<B: ExtraBackendMethods>(
     backend: B,
-    tcx: TyCtxt,
+    tcx: TyCtxt<'_, '_, '_>,
     crate_info: &CrateInfo,
     shared_emitter: SharedEmitter,
     codegen_worker_send: Sender<Message<B>>,
@@ -1033,6 +1056,7 @@ fn start_executing_work<B: ExtraBackendMethods>(
         save_temps: sess.opts.cg.save_temps,
         opts: Arc::new(sess.opts.clone()),
         time_passes: sess.time_passes(),
+        profiler: sess.self_profiling.clone(),
         exported_symbols,
         plugin_passes: sess.plugin_llvm_passes.borrow().clone(),
         remark: sess.opts.cg.remark.clone(),
@@ -1683,7 +1707,7 @@ impl SharedEmitter {
 }
 
 impl Emitter for SharedEmitter {
-    fn emit(&mut self, db: &DiagnosticBuilder) {
+    fn emit(&mut self, db: &DiagnosticBuilder<'_>) {
         drop(self.sender.send(SharedEmitterMessage::Diagnostic(Diagnostic {
             msg: db.message(),
             code: db.code.clone(),
@@ -1822,7 +1846,7 @@ impl<B: ExtraBackendMethods> OngoingCodegen<B> {
     }
 
     pub fn submit_pre_codegened_module_to_llvm(&self,
-                                                       tcx: TyCtxt,
+                                                       tcx: TyCtxt<'_, '_, '_>,
                                                        module: ModuleCodegen<B::Module>) {
         self.wait_for_signal_to_codegen_item();
         self.check_for_errors(tcx.sess);
@@ -1832,7 +1856,7 @@ impl<B: ExtraBackendMethods> OngoingCodegen<B> {
         submit_codegened_module_to_llvm(&self.backend, tcx, module, cost);
     }
 
-    pub fn codegen_finished(&self, tcx: TyCtxt) {
+    pub fn codegen_finished(&self, tcx: TyCtxt<'_, '_, '_>) {
         self.wait_for_signal_to_codegen_item();
         self.check_for_errors(tcx.sess);
         drop(self.coordinator_send.send(Box::new(Message::CodegenComplete::<B>)));
@@ -1871,7 +1895,7 @@ impl<B: ExtraBackendMethods> OngoingCodegen<B> {
 
 pub fn submit_codegened_module_to_llvm<B: ExtraBackendMethods>(
     _backend: &B,
-    tcx: TyCtxt,
+    tcx: TyCtxt<'_, '_, '_>,
     module: ModuleCodegen<B::Module>,
     cost: u64
 ) {
@@ -1884,7 +1908,7 @@ pub fn submit_codegened_module_to_llvm<B: ExtraBackendMethods>(
 
 pub fn submit_post_lto_module_to_llvm<B: ExtraBackendMethods>(
     _backend: &B,
-    tcx: TyCtxt,
+    tcx: TyCtxt<'_, '_, '_>,
     module: CachedModuleCodegen
 ) {
     let llvm_work_item = WorkItem::CopyPostLtoArtifacts(module);
@@ -1896,7 +1920,7 @@ pub fn submit_post_lto_module_to_llvm<B: ExtraBackendMethods>(
 
 pub fn submit_pre_lto_module_to_llvm<B: ExtraBackendMethods>(
     _backend: &B,
-    tcx: TyCtxt,
+    tcx: TyCtxt<'_, '_, '_>,
     module: CachedModuleCodegen
 ) {
     let filename = pre_lto_bitcode_filename(&module.name);
@@ -1921,7 +1945,7 @@ pub fn pre_lto_bitcode_filename(module_name: &str) -> String {
     format!("{}.{}", module_name, PRE_LTO_BC_EXT)
 }
 
-fn msvc_imps_needed(tcx: TyCtxt) -> bool {
+fn msvc_imps_needed(tcx: TyCtxt<'_, '_, '_>) -> bool {
     // This should never be true (because it's not supported). If it is true,
     // something is wrong with commandline arg validation.
     assert!(!(tcx.sess.opts.cg.linker_plugin_lto.enabled() &&

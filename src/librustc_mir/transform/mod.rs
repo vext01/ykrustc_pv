@@ -79,10 +79,10 @@ fn mir_keys<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, krate: CrateNum)
                               v: &'tcx hir::VariantData,
                               _: ast::Name,
                               _: &'tcx hir::Generics,
-                              _: ast::NodeId,
+                              _: hir::HirId,
                               _: Span) {
-            if let hir::VariantData::Tuple(_, node_id, _) = *v {
-                self.set.insert(self.tcx.hir().local_def_id(node_id));
+            if let hir::VariantData::Tuple(_, hir_id) = *v {
+                self.set.insert(self.tcx.hir().local_def_id_from_hir_id(hir_id));
             }
             intravisit::walk_struct_def(self, v)
         }
@@ -215,8 +215,8 @@ fn mir_const<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx Stea
 }
 
 fn mir_validated<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx Steal<Mir<'tcx>> {
-    let node_id = tcx.hir().as_local_node_id(def_id).unwrap();
-    if let hir::BodyOwnerKind::Const = tcx.hir().body_owner_kind(node_id) {
+    let hir_id = tcx.hir().as_local_hir_id(def_id).unwrap();
+    if let hir::BodyOwnerKind::Const = tcx.hir().body_owner_kind_by_hir_id(hir_id) {
         // Ensure that we compute the `mir_const_qualif` for constants at
         // this point, before we steal the mir-const result.
         let _ = tcx.mir_const_qualif(def_id);
@@ -242,15 +242,11 @@ fn optimized_mir<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> &'tcx 
 
     let mut mir = tcx.mir_validated(def_id).steal();
     run_passes(tcx, &mut mir, InstanceDef::Item(def_id), MirPhase::Optimized, &[
-        // Remove all things not needed by analysis
+        // Remove all things only needed by analysis
         &no_landing_pads::NoLandingPads,
         &simplify_branches::SimplifyBranches::new("initial"),
         &remove_noop_landing_pads::RemoveNoopLandingPads,
-        // Remove all `AscribeUserType` statements.
-        &cleanup_post_borrowck::CleanAscribeUserType,
-        // Remove all `FakeRead` statements and the borrows that are only
-        // used for checking matches
-        &cleanup_post_borrowck::CleanFakeReadsAndBorrows,
+        &cleanup_post_borrowck::CleanupNonCodegenStatements,
 
         &simplify::SimplifyCfg::new("early-opt"),
 

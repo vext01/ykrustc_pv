@@ -7,6 +7,7 @@ use std::hash::Hash;
 
 use rustc::hir;
 use rustc::mir;
+use rustc::mir::interpret::truncate;
 use rustc::ty::{self, Ty};
 use rustc::ty::layout::{self, Size, Align, LayoutOf, TyLayout, HasDataLayout, VariantIdx};
 use rustc::ty::TypeFoldable;
@@ -58,7 +59,7 @@ impl<'tcx, Tag> ::std::ops::Deref for PlaceTy<'tcx, Tag> {
 }
 
 /// A MemPlace with its layout. Constructing it is only possible in this module.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct MPlaceTy<'tcx, Tag=()> {
     mplace: MemPlace<Tag>,
     pub layout: TyLayout<'tcx>,
@@ -326,6 +327,10 @@ where
 
         let mplace = MemPlace {
             ptr: val.to_scalar_ptr()?,
+            // We could use the run-time alignment here. For now, we do not, because
+            // the point of tracking the alignment here is to make sure that the *static*
+            // alignment information emitted with the loads is correct. The run-time
+            // alignment can only be more restrictive.
             align: layout.align.abi,
             meta: val.to_meta()?,
         };
@@ -385,9 +390,11 @@ where
         // above). In that case, all fields are equal.
         let field_layout = base.layout.field(self, usize::try_from(field).unwrap_or(0))?;
 
-        // Offset may need adjustment for unsized fields
+        // Offset may need adjustment for unsized fields.
         let (meta, offset) = if field_layout.is_unsized() {
-            // re-use parent metadata to determine dynamic field layout
+            // Re-use parent metadata to determine dynamic field layout.
+            // With custom DSTS, this *will* execute user-defined code, but the same
+            // happens at run-time so that's okay.
             let align = match self.size_and_align_of(base.meta, field_layout)? {
                 Some((_, align)) => align,
                 None if offset == Size::ZERO =>
@@ -574,8 +581,9 @@ where
         mir_place: &mir::Place<'tcx>
     ) -> EvalResult<'tcx, MPlaceTy<'tcx, M::PointerTag>> {
         use rustc::mir::Place::*;
+        use rustc::mir::PlaceBase;
         Ok(match *mir_place {
-            Promoted(ref promoted) => {
+            Base(PlaceBase::Promoted(ref promoted)) => {
                 let instance = self.frame().instance;
                 self.const_eval_raw(GlobalId {
                     instance,
@@ -583,7 +591,7 @@ where
                 })?
             }
 
-            Static(ref static_) => {
+            Base(PlaceBase::Static(ref static_)) => {
                 assert!(!static_.ty.needs_subst());
                 let layout = self.layout_of(static_.ty)?;
                 let instance = ty::Instance::mono(*self.tcx, static_.def_id);
@@ -617,8 +625,9 @@ where
         mir_place: &mir::Place<'tcx>
     ) -> EvalResult<'tcx, PlaceTy<'tcx, M::PointerTag>> {
         use rustc::mir::Place::*;
+        use rustc::mir::PlaceBase;
         let place = match *mir_place {
-            Local(mir::RETURN_PLACE) => match self.frame().return_place {
+            Base(PlaceBase::Local(mir::RETURN_PLACE)) => match self.frame().return_place {
                 Some(return_place) =>
                     // We use our layout to verify our assumption; caller will validate
                     // their layout on return.
@@ -628,7 +637,7 @@ where
                     },
                 None => return err!(InvalidNullPointerUsage),
             },
-            Local(local) => PlaceTy {
+            Base(PlaceBase::Local(local)) => PlaceTy {
                 place: Place::Local {
                     frame: self.cur_frame(),
                     local,
@@ -959,8 +968,7 @@ where
                 // their computation, but the in-memory tag is the smallest possible
                 // representation
                 let size = tag.value.size(self);
-                let shift = 128 - size.bits();
-                let discr_val = (discr_val << shift) >> shift;
+                let discr_val = truncate(discr_val, size);
 
                 let discr_dest = self.place_field(dest, 0)?;
                 self.write_scalar(Scalar::from_uint(discr_val, size), discr_dest)?;

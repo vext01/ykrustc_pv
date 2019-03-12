@@ -21,7 +21,7 @@ use syntax::ast::Mutability;
 use syntax::source_map::{Span, DUMMY_SP};
 
 use crate::interpret::{self,
-    PlaceTy, MPlaceTy, MemPlace, OpTy, ImmTy, Operand, Immediate, Scalar, Pointer,
+    PlaceTy, MPlaceTy, MemPlace, OpTy, ImmTy, Immediate, Scalar, Pointer,
     RawConst, ConstValue,
     EvalResult, EvalError, EvalErrorKind, GlobalId, EvalContext, StackPopCleanup,
     Allocation, AllocId, MemoryKind,
@@ -62,45 +62,46 @@ pub(crate) fn eval_promoted<'a, 'mir, 'tcx>(
     eval_body_using_ecx(&mut ecx, cid, Some(mir), param_env)
 }
 
-// FIXME: These two conversion functions are bad hacks.  We should just always use allocations.
-pub fn op_to_const<'tcx>(
+fn mplace_to_const<'tcx>(
+    ecx: &CompileTimeEvalContext<'_, '_, 'tcx>,
+    mplace: MPlaceTy<'tcx>,
+) -> EvalResult<'tcx, ty::Const<'tcx>> {
+    let MemPlace { ptr, align, meta } = *mplace;
+    // extract alloc-offset pair
+    assert!(meta.is_none());
+    let ptr = ptr.to_ptr()?;
+    let alloc = ecx.memory.get(ptr.alloc_id)?;
+    assert!(alloc.align >= align);
+    assert!(alloc.bytes.len() as u64 - ptr.offset.bytes() >= mplace.layout.size.bytes());
+    let mut alloc = alloc.clone();
+    alloc.align = align;
+    // FIXME shouldn't it be the case that `mark_static_initialized` has already
+    // interned this?  I thought that is the entire point of that `FinishStatic` stuff?
+    let alloc = ecx.tcx.intern_const_alloc(alloc);
+    let val = ConstValue::ByRef(ptr, alloc);
+    Ok(ty::Const { val, ty: mplace.layout.ty })
+}
+
+fn op_to_const<'tcx>(
     ecx: &CompileTimeEvalContext<'_, '_, 'tcx>,
     op: OpTy<'tcx>,
-    may_normalize: bool,
 ) -> EvalResult<'tcx, ty::Const<'tcx>> {
     // We do not normalize just any data.  Only scalar layout and slices.
-    let normalize = may_normalize
-        && match op.layout.abi {
-            layout::Abi::Scalar(..) => true,
-            layout::Abi::ScalarPair(..) => op.layout.ty.is_slice(),
-            _ => false,
-        };
+    let normalize = match op.layout.abi {
+        layout::Abi::Scalar(..) => true,
+        layout::Abi::ScalarPair(..) => op.layout.ty.is_slice(),
+        _ => false,
+    };
     let normalized_op = if normalize {
-        ecx.try_read_immediate(op)?
+        Err(*ecx.read_immediate(op).expect("normalization works on validated constants"))
     } else {
-        match *op {
-            Operand::Indirect(mplace) => Err(mplace),
-            Operand::Immediate(val) => Ok(val)
-        }
+        op.try_as_mplace()
     };
     let val = match normalized_op {
-        Err(MemPlace { ptr, align, meta }) => {
-            // extract alloc-offset pair
-            assert!(meta.is_none());
-            let ptr = ptr.to_ptr()?;
-            let alloc = ecx.memory.get(ptr.alloc_id)?;
-            assert!(alloc.align >= align);
-            assert!(alloc.bytes.len() as u64 - ptr.offset.bytes() >= op.layout.size.bytes());
-            let mut alloc = alloc.clone();
-            alloc.align = align;
-            // FIXME shouldn't it be the case that `mark_static_initialized` has already
-            // interned this?  I thought that is the entire point of that `FinishStatic` stuff?
-            let alloc = ecx.tcx.intern_const_alloc(alloc);
-            ConstValue::ByRef(ptr.alloc_id, alloc, ptr.offset)
-        },
-        Ok(Immediate::Scalar(x)) =>
+        Ok(mplace) => return mplace_to_const(ecx, mplace),
+        Err(Immediate::Scalar(x)) =>
             ConstValue::Scalar(x.not_undef()?),
-        Ok(Immediate::ScalarPair(a, b)) =>
+        Err(Immediate::ScalarPair(a, b)) =>
             ConstValue::Slice(a.not_undef()?, b.to_usize(ecx)?),
     };
     Ok(ty::Const { val, ty: op.layout.ty })
@@ -465,45 +466,42 @@ impl<'a, 'mir, 'tcx> interpret::Machine<'a, 'mir, 'tcx>
 }
 
 /// Projects to a field of a (variant of a) const.
+// this function uses `unwrap` copiously, because an already validated constant must have valid
+// fields and can thus never fail outside of compiler bugs
 pub fn const_field<'a, 'tcx>(
     tcx: TyCtxt<'a, 'tcx, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     variant: Option<VariantIdx>,
     field: mir::Field,
     value: ty::Const<'tcx>,
-) -> ::rustc::mir::interpret::ConstEvalResult<'tcx> {
+) -> ty::Const<'tcx> {
     trace!("const_field: {:?}, {:?}", field, value);
     let ecx = mk_eval_cx(tcx, DUMMY_SP, param_env);
-    let result = (|| {
-        // get the operand again
-        let op = ecx.lazy_const_to_op(ty::LazyConst::Evaluated(value), value.ty)?;
-        // downcast
-        let down = match variant {
-            None => op,
-            Some(variant) => ecx.operand_downcast(op, variant)?
-        };
-        // then project
-        let field = ecx.operand_field(down, field.index() as u64)?;
-        // and finally move back to the const world, always normalizing because
-        // this is not called for statics.
-        op_to_const(&ecx, field, true)
-    })();
-    result.map_err(|error| {
-        let err = error_to_const_error(&ecx, error);
-        err.report_as_error(ecx.tcx, "could not access field of constant");
-        ErrorHandled::Reported
-    })
+    // get the operand again
+    let op = ecx.const_to_op(value, None).unwrap();
+    // downcast
+    let down = match variant {
+        None => op,
+        Some(variant) => ecx.operand_downcast(op, variant).unwrap(),
+    };
+    // then project
+    let field = ecx.operand_field(down, field.index() as u64).unwrap();
+    // and finally move back to the const world, always normalizing because
+    // this is not called for statics.
+    op_to_const(&ecx, field).unwrap()
 }
 
+// this function uses `unwrap` copiously, because an already validated constant must have valid
+// fields and can thus never fail outside of compiler bugs
 pub fn const_variant_index<'a, 'tcx>(
     tcx: TyCtxt<'a, 'tcx, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     val: ty::Const<'tcx>,
-) -> EvalResult<'tcx, VariantIdx> {
+) -> VariantIdx {
     trace!("const_variant_index: {:?}", val);
     let ecx = mk_eval_cx(tcx, DUMMY_SP, param_env);
-    let op = ecx.lazy_const_to_op(ty::LazyConst::Evaluated(val), val.ty)?;
-    Ok(ecx.read_discriminant(op)?.1)
+    let op = ecx.const_to_op(val, None).unwrap();
+    ecx.read_discriminant(op).unwrap().1
 }
 
 pub fn error_to_const_error<'a, 'mir, 'tcx>(
@@ -523,13 +521,11 @@ fn validate_and_turn_into_const<'a, 'tcx>(
     let cid = key.value;
     let ecx = mk_eval_cx(tcx, tcx.def_span(key.value.instance.def_id()), key.param_env);
     let val = (|| {
-        let op = ecx.raw_const_to_mplace(constant)?.into();
-        // FIXME: Once the visitor infrastructure landed, change validation to
-        // work directly on `MPlaceTy`.
-        let mut ref_tracking = RefTracking::new(op);
-        while let Some((op, path)) = ref_tracking.todo.pop() {
+        let mplace = ecx.raw_const_to_mplace(constant)?;
+        let mut ref_tracking = RefTracking::new(mplace);
+        while let Some((mplace, path)) = ref_tracking.todo.pop() {
             ecx.validate_operand(
-                op,
+                mplace.into(),
                 path,
                 Some(&mut ref_tracking),
                 true, // const mode
@@ -537,8 +533,11 @@ fn validate_and_turn_into_const<'a, 'tcx>(
         }
         // Now that we validated, turn this into a proper constant.
         let def_id = cid.instance.def.def_id();
-        let normalize = tcx.is_static(def_id).is_none() && cid.promoted.is_none();
-        op_to_const(&ecx, op, normalize)
+        if tcx.is_static(def_id).is_some() || cid.promoted.is_some() {
+            mplace_to_const(&ecx, mplace)
+        } else {
+            op_to_const(&ecx, mplace.into())
+        }
     })();
 
     val.map_err(|error| {
@@ -615,7 +614,7 @@ pub fn const_eval_raw_provider<'a, 'tcx>(
     let cid = key.value;
     let def_id = cid.instance.def.def_id();
 
-    if let Some(id) = tcx.hir().as_local_node_id(def_id) {
+    if let Some(id) = tcx.hir().as_local_hir_id(def_id) {
         let tables = tcx.typeck_tables_of(def_id);
 
         // Do match-check before building MIR
@@ -623,7 +622,7 @@ pub fn const_eval_raw_provider<'a, 'tcx>(
             return Err(ErrorHandled::Reported)
         }
 
-        if let hir::BodyOwnerKind::Const = tcx.hir().body_owner_kind(id) {
+        if let hir::BodyOwnerKind::Const = tcx.hir().body_owner_kind_by_hir_id(id) {
             tcx.mir_const_qualif(def_id);
         }
 
@@ -663,11 +662,11 @@ pub fn const_eval_raw_provider<'a, 'tcx>(
                 // because any code that existed before validation could not have failed validation
                 // thus preventing such a hard error from being a backwards compatibility hazard
                 Some(Def::Const(_)) | Some(Def::AssociatedConst(_)) => {
-                    let node_id = tcx.hir().as_local_node_id(def_id).unwrap();
+                    let hir_id = tcx.hir().as_local_hir_id(def_id).unwrap();
                     err.report_as_lint(
                         tcx.at(tcx.def_span(def_id)),
                         "any use of this value will cause an error",
-                        node_id,
+                        hir_id,
                     )
                 },
                 // promoting runtime code is only allowed to error if it references broken constants
@@ -683,7 +682,7 @@ pub fn const_eval_raw_provider<'a, 'tcx>(
                         err.report_as_lint(
                             tcx.at(span),
                             "reaching this expression at runtime will panic or abort",
-                            tcx.hir().as_local_node_id(def_id).unwrap(),
+                            tcx.hir().as_local_hir_id(def_id).unwrap(),
                         )
                     }
                 // anything else (array lengths, enum initializers, constant patterns) are reported

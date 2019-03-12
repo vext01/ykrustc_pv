@@ -36,7 +36,7 @@ macro_rules! forward {
     // Forward pattern for &self -> &Self
     (
         $(#[$attrs:meta])*
-        pub fn $n:ident(&self, $($name:ident: $ty:ty),* $(,)*) -> &Self
+        pub fn $n:ident(&self, $($name:ident: $ty:ty),* $(,)?) -> &Self
     ) => {
         $(#[$attrs])*
         pub fn $n(&self, $($name: $ty),*) -> &Self {
@@ -48,7 +48,7 @@ macro_rules! forward {
     // Forward pattern for &mut self -> &mut Self
     (
         $(#[$attrs:meta])*
-        pub fn $n:ident(&mut self, $($name:ident: $ty:ty),* $(,)*) -> &mut Self
+        pub fn $n:ident(&mut self, $($name:ident: $ty:ty),* $(,)?) -> &mut Self
     ) => {
         $(#[$attrs])*
         pub fn $n(&mut self, $($name: $ty),*) -> &mut Self {
@@ -64,7 +64,7 @@ macro_rules! forward {
         pub fn $n:ident<S: Into<MultiSpan>>(
             &mut self,
             $($name:ident: $ty:ty),*
-            $(,)*
+            $(,)?
         ) -> &mut Self
     ) => {
         $(#[$attrs])*
@@ -103,7 +103,9 @@ impl<'a> DiagnosticBuilder<'a> {
     /// Buffers the diagnostic for later emission, unless handler
     /// has disabled such buffering.
     pub fn buffer(mut self, buffered_diagnostics: &mut Vec<Diagnostic>) {
-        if self.handler.flags.dont_buffer_diagnostics || self.handler.flags.treat_err_as_bug {
+        if self.handler.flags.dont_buffer_diagnostics ||
+            self.handler.flags.treat_err_as_bug.is_some()
+        {
             self.emit();
             return;
         }

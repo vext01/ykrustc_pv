@@ -12,7 +12,7 @@ use crate::borrow_check::path_utils::*;
 use crate::dataflow::move_paths::indexes::BorrowIndex;
 use rustc::ty::TyCtxt;
 use rustc::mir::visit::Visitor;
-use rustc::mir::{BasicBlock, Location, Mir, Place, Rvalue};
+use rustc::mir::{BasicBlock, Location, Mir, Place, PlaceBase, Rvalue};
 use rustc::mir::{Statement, StatementKind};
 use rustc::mir::{Terminator, TerminatorKind};
 use rustc::mir::{Operand, BorrowKind};
@@ -78,13 +78,8 @@ impl<'cx, 'tcx, 'gcx> Visitor<'tcx> for InvalidationGenerator<'cx, 'tcx, 'gcx> {
                     JustWrite
                 );
             }
-            StatementKind::FakeRead(_, ref place) => {
-                self.access_place(
-                    ContextKind::FakeRead.new(location),
-                    place,
-                    (Deep, Read(ReadKind::Borrow(BorrowKind::Shared))),
-                    LocalMutationIsAllowed::No,
-                );
+            StatementKind::FakeRead(_, _) => {
+                // Only relavent for initialized/liveness/safety checks.
             }
             StatementKind::SetDiscriminant {
                 ref place,
@@ -136,7 +131,7 @@ impl<'cx, 'tcx, 'gcx> Visitor<'tcx> for InvalidationGenerator<'cx, 'tcx, 'gcx> {
             StatementKind::StorageDead(local) => {
                 self.access_place(
                     ContextKind::StorageDead.new(location),
-                    &Place::Local(local),
+                    &Place::Base(PlaceBase::Local(local)),
                     (Shallow(None), Write(WriteKind::StorageDeadOrDrop)),
                     LocalMutationIsAllowed::Yes,
                 );
@@ -438,7 +433,9 @@ impl<'cg, 'cx, 'tcx, 'gcx> InvalidationGenerator<'cx, 'tcx, 'gcx> {
                     }
 
                     (Read(_), BorrowKind::Shallow) | (Reservation(..), BorrowKind::Shallow)
-                    | (Read(_), BorrowKind::Shared) | (Reservation(..), BorrowKind::Shared) => {
+                    | (Read(_), BorrowKind::Shared) | (Reservation(..), BorrowKind::Shared)
+                    | (Read(ReadKind::Borrow(BorrowKind::Shallow)), BorrowKind::Unique)
+                    | (Read(ReadKind::Borrow(BorrowKind::Shallow)), BorrowKind::Mut { .. }) => {
                         // Reads/reservations don't invalidate shared or shallow borrows
                     }
 
