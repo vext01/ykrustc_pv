@@ -79,7 +79,6 @@ impl MirPass for AddYkSWTCalls {
 
             let crate_hash_const = tcx.mk_lazy_const(
                 ty::LazyConst::Evaluated(ty::Const::from_u64(tcx, local_crate_hash)));
-
             let crate_hash_oper = Operand::Constant(box Constant {
                 span: DUMMY_SP,
                 ty: u64_ty,

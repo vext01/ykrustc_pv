@@ -17,11 +17,9 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    //Place, Rvalue, Statement, Successors, Local
-    Place, Rvalue, Statement, Local//, BasePlace
+    Place, Rvalue, Statement, Local, PlaceBase,
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
-//use rustc::mir::HasLocalDecls;
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
 use std::fs::File;
@@ -430,7 +428,7 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
         let (ccx, place) = self;
 
         match place {
-            Place::Local(_local) => ykpack::Place::Local(ccx.get_tir_var(*local)),
+            Place::Base(PlaceBase::Local(local)) => ykpack::Place::Local(ccx.get_tir_var(*local)),
             _ => ykpack::Place::Unimplemented, // FIXME
         }
     }
