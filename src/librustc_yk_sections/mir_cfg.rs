@@ -9,13 +9,8 @@
 
 #![allow(unused_imports)]
 
-//! MIR to TIR converter/serialiser.
-//!
-//! We convert Rust's MIR into our own IR we call "TIR" (tracing IR), which is then stashed away in
-//! an ELF section so that the JIT runtime can use it later.
-//!
-//!  * Unlike MIR, TIR is stored in SSA form.
-//!  * We preserve the MIR block structure.
+//! This module converts MIR into Yorick TIR (Tracing IR). TIR is more suitable for the run-time
+//! tracer: TIR (unlike MIR) is in SSA form (but it does preserve MIR's block structure).
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
