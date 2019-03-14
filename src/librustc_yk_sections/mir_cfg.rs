@@ -17,10 +17,11 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Successors, Local
+    //Place, Rvalue, Statement, Successors, Local
+    Place, Rvalue, Statement, Local//, BasePlace
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
-use rustc::mir::HasLocalDecls;
+//use rustc::mir::HasLocalDecls;
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
 use std::fs::File;
@@ -29,7 +30,7 @@ use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
 use std::error::Error;
 use std::cell::{Cell, RefCell};
-use rustc_data_structures::indexed_vec::{Idx, IndexVec};
+use rustc_data_structures::indexed_vec::{IndexVec};
 use rustc_data_structures::graph::dominators::Dominators;
 use ykpack;
 
@@ -51,8 +52,7 @@ struct ConvCx<'a, 'tcx, 'gcx> {
 }
 
 impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
-    fn new(tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, mir: &Mir<'tcx>) -> Self {
-        let num_locals = mir.local_decls().len();
+    fn new(tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, _mir: &Mir<'tcx>) -> Self {
         let var_map = IndexVec::new();
 
         Self {
@@ -429,8 +429,8 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
     fn to_pack(&mut self) -> ykpack::Place {
         let (ccx, place) = self;
 
-        match *place {
-            Place::Local(local) => ykpack::Place::Local(ccx.get_tir_var(*local)),
+        match place {
+            Place::Local(_local) => ykpack::Place::Local(ccx.get_tir_var(*local)),
             _ => ykpack::Place::Unimplemented, // FIXME
         }
     }
