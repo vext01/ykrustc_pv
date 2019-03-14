@@ -8,10 +8,13 @@
 // except according to those terms.
 
 #![feature(box_patterns)]
+#![feature(try_from)]
 
 extern crate rustc;
 extern crate rustc_yk_link;
 extern crate rustc_codegen_utils;
 extern crate ykpack;
+//extern crate rustc_data_structures;
+#[macro_use] extern crate log;
 
 pub mod mir_cfg;
