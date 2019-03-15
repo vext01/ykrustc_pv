@@ -17,7 +17,7 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Local, PlaceBase,
+    Place, Rvalue, Statement, Local, PlaceBase
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -28,7 +28,7 @@ use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
 use std::error::Error;
 use std::cell::{Cell, RefCell};
-use rustc_data_structures::indexed_vec::{IndexVec};
+use rustc_data_structures::indexed_vec::{IndexVec, Idx};
 use rustc_data_structures::graph::dominators::Dominators;
 use ykpack;
 
@@ -43,7 +43,7 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
     /// The definition sites of TIR variable in terms of basic blocks.
     def_sites: RefCell<Vec<Vec<BasicBlock>>>,
-    /// The next new TIR variable index.
+    /// The next TIR variable index to be issued.
     next_tir_var: Cell<TirVarIndex>,
     /// A mapping from MIR variables to TIR variables.
     var_map: RefCell<IndexVec<Local, Option<TirVarIndex>>>,
@@ -61,15 +61,14 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
         }
     }
 
-    /// Returns the next TIR variable index, incrementing the internal counter.
+    /// Issues a fresh TIR variable index.
     fn next_tir_var(&self) -> TirVarIndex {
         let var_idx = self.next_tir_var.get();
         self.next_tir_var.set(var_idx + 1);
         var_idx
     }
 
-    /// Get the TIR variable corresponding with the MIR variable `local`, creating a fresh
-    /// variable if needed.
+    /// Get the TIR variable corresponding with the MIR variable, creating a fresh one if needed.
     fn get_tir_var(&self, local: Local) -> TirVarIndex {
         let local_u32 = local.as_u32();
         let mut var_map = self.var_map.borrow_mut();
@@ -134,6 +133,8 @@ pub fn generate_tir<'a, 'tcx, 'gcx>(
 
             // Add PHI nodes.
             let phied_pack = PhiInserter::new(mir, pre_ssa_pack, ccx.def_sites()).pack();
+
+            // FIXME - rename variables with fresh SSA names.
 
             // Put the finalised TIR to disk.
             enc.serialise(phied_pack)?;
@@ -286,7 +287,9 @@ impl<'a, 'tcx> PhiInserter<'a, 'tcx> {
             for (bb, mut bb_data) in blocks.iter_mut().enumerate() {
                 for a in &a_phi[bb] {
                     let lhs = ykpack::Place::Local(*a);
-                    let rhs = ykpack::Rvalue::Phi(vec![Box::new(lhs.clone())]); // FIXME number of args.
+                    let num_preds = self.mir.predecessors_for(BasicBlock::new(bb)).len();
+                    let rhs_vars = (0..num_preds).map(|_| Box::new(lhs.clone())).collect();
+                    let rhs = ykpack::Rvalue::Phi(rhs_vars);
                     bb_data.stmts.insert(0, ykpack::Statement::Assign(lhs, rhs));
                 }
             }
