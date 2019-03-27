@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use std::fs::File;
 use rustc_yk_link::YkExtraLinkObject;
 use std::fs;
+use std::io::{self, Write};
 use std::error::Error;
 use std::cell::{Cell, RefCell};
 use std::mem::size_of;
@@ -113,7 +114,7 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
 
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
 pub fn generate_tir<'a, 'tcx, 'gcx>(
-    tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, exe_filename: PathBuf)
+    tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, exe_filename: PathBuf, dump_filename: Option<PathBuf>)
     -> Result<YkExtraLinkObject, Box<dyn Error>> {
 
     // The filename must be the same between builds for the reproducible build tests to pass.
@@ -126,6 +127,10 @@ pub fn generate_tir<'a, 'tcx, 'gcx>(
     // order, thus we sort the `DefId`s first.
     let mut sorted_def_ids: Vec<&DefId> = def_ids.iter().collect();
     sorted_def_ids.sort();
+
+    // Only if the user requested, open a file for the textual TIR dump.
+    let mut dump_file: Option<File> = dump_filename.map_or_else::<Result<Option<File>, io::Error>, _, _>(
+        || Ok(None), |fln| Ok(Some(File::create(&fln)?)))?;
 
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
@@ -141,7 +146,12 @@ pub fn generate_tir<'a, 'tcx, 'gcx>(
             let phied_pack = PhiInserter::new(mir, pre_ssa_pack, ccx.def_sites()).pack();
 
             // FIXME - rename variables with fresh SSA names.
-            enc.serialise(phied_pack)?;
+
+            if let Some(ref mut f) = dump_file {
+                write!(f, "{}", phied_pack)?;
+            } else {
+                enc.serialise(phied_pack)?;
+            }
         }
     }
     enc.done()?;
@@ -327,7 +337,7 @@ impl<'tcx> ToPack<ykpack::Pack> for (&ConvCx<'_, 'tcx, '_>, &DefId, &Mir<'tcx>) 
         let ser_def_id = ykpack::DefId::new(
             ccx.tcx.crate_hash(def_id.krate).as_u64(), def_id.index.as_raw_u32());
 
-        ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ser_blks))
+        ykpack::Pack::Mir(ykpack::Mir::new(ser_def_id, ccx.tcx.item_path_str(**def_id), ser_blks))
     }
 }
 

@@ -1040,11 +1040,18 @@ pub fn start_codegen<'tcx>(
 
     // Output Yorick debug sections into binary targets.
     if tcx.sess.crate_types.borrow().contains(&config::CrateType::Executable) {
+        // Are we dumping the textual version of the TIR at the same time?
+        let tir_dump_fn = if tcx.sess.opts.output_types.contains_key(&OutputType::YkTir) {
+            Some(outputs.path(OutputType::YkTir))
+        } else {
+            None
+        };
+
         let out_fname = out_filename(
             tcx.sess, config::CrateType::Executable, &outputs,
             &*tcx.crate_name(LOCAL_CRATE).as_str());
 
-        match generate_tir(&tcx, &def_ids, out_fname) {
+        match generate_tir(&tcx, &def_ids, out_fname, tir_dump_fn) {
             Ok(tir) => tcx.sess.yk_link_objects.borrow_mut().push(tir),
             Err(e) => {
                 tcx.sess.err(&format!("could not emit TIR: {}", e));
