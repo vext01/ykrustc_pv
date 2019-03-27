@@ -22,13 +22,13 @@ use rustc::mir::{
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
-use std::fs::File;
+use std::fs::{self, File};
 use rustc_yk_link::YkExtraLinkObject;
-use std::fs;
-use std::io::{self, Write};
+use std::io::Write;
 use std::error::Error;
 use std::cell::{Cell, RefCell};
 use std::mem::size_of;
+use std::ops::Drop;
 use rustc_data_structures::bit_set::BitSet;
 use rustc_data_structures::indexed_vec::{IndexVec, Idx};
 use rustc_data_structures::graph::dominators::Dominators;
@@ -36,7 +36,66 @@ use ykpack;
 use ykpack::LocalIndex as TirLocal;
 
 const SECTION_NAME: &'static str = ".yk_tir";
-const TMP_EXT: &'static str = ".yk_tir.tmp";
+pub const TMP_EXT: &'static str = "yk_tir.tmp";
+
+/// Describes how to output TIR.
+pub enum TirOutput<'a> {
+    /// Dumps the TIR to a binary format for inclusion into the executable.
+    Binary {
+        /// The encoder used to serialise packs.
+        enc: ykpack::Encoder<'a>,
+        /// The path to the temporary file. So we can delete it later.
+        path: PathBuf,
+    },
+    /// Dump the TIR to textual format for testing or debugging.
+    /// This is used when rustc is run with `--emit yk-tir`.
+    Textual {
+        /// Where to write the textual representation.
+        file: &'a mut File,
+    },
+}
+
+impl<'a> TirOutput<'a> {
+    pub fn new_binary(file: &'a mut File, path: PathBuf) -> Self {
+        TirOutput::Binary {
+            enc: ykpack::Encoder::from(file),
+            path,
+        )
+    }
+
+    pub fn new_textual(file: &'a mut File) -> Self {
+        TirOutput::Textual { file }
+    }
+
+    fn write_pack(&mut self, pack: ykpack::Pack) -> Result<(), Box<dyn Error>> {
+        match self {
+            TirOutput::Binary{ref mut enc, ..} => enc.serialise(pack)?,
+            TirOutput::Textual{ref mut file, ..} => write!(file, "{}", pack)?,
+        }
+        Ok(())
+    }
+
+    /// Obtain the resulting linkable ELF object, if applicable.
+    fn linkable(self) -> Option<YkExtraLinkObject> {
+        match self {
+            TirOutput::Binary{ref path, ..} => Some(YkExtraLinkObject::new(path, SECTION_NAME)),
+            _ => None,
+        }
+    }
+}
+
+impl <'a> Drop for TirOutput<'a> {
+    fn drop(&mut self) {
+        match self {
+            TirOutput::Binary{path, ..} => {
+                // By the time we drop, we will have converted the raw binary file into ELF where
+                // upon it is no longer needed.
+                fs::remove_file(&path).expect("couldn't remove TIR temp file");
+            },
+            _ => (),
+        }
+    }
+}
 
 /// A conversion context holds the state needed to perform the conversion to (pre-SSA) TIR.
 struct ConvCx<'a, 'tcx, 'gcx> {
@@ -114,23 +173,13 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
 
 /// Converts and serialises the specified DefIds, returning an linkable ELF object.
 pub fn generate_tir<'a, 'tcx, 'gcx>(
-    tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, exe_filename: PathBuf, dump_filename: Option<PathBuf>)
-    -> Result<YkExtraLinkObject, Box<dyn Error>> {
-
-    // The filename must be the same between builds for the reproducible build tests to pass.
-    let mut mir_path: String = exe_filename.to_str().unwrap().to_owned();
-    mir_path.push_str(TMP_EXT);
-    let mut fh = File::create(&mir_path)?;
-    let mut enc = ykpack::Encoder::from(&mut fh);
+    tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, mut output: TirOutput)
+    -> Result<Option<YkExtraLinkObject>, Box<dyn Error>> {
 
     // To satisfy the reproducible build tests, the CFG must be written out in a deterministic
     // order, thus we sort the `DefId`s first.
     let mut sorted_def_ids: Vec<&DefId> = def_ids.iter().collect();
     sorted_def_ids.sort();
-
-    // Only if the user requested, open a file for the textual TIR dump.
-    let mut dump_file: Option<File> = dump_filename.map_or_else::<Result<Option<File>, io::Error>, _, _>(
-        || Ok(None), |fln| Ok(Some(File::create(&fln)?)))?;
 
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
@@ -147,21 +196,11 @@ pub fn generate_tir<'a, 'tcx, 'gcx>(
 
             // FIXME - rename variables with fresh SSA names.
 
-            if let Some(ref mut f) = dump_file {
-                write!(f, "{}", phied_pack)?;
-            } else {
-                enc.serialise(phied_pack)?;
-            }
+            output.write_pack(phied_pack)?;
         }
     }
-    enc.done()?;
 
-    // Now graft the resulting blob file into an object file.
-    let path = PathBuf::from(mir_path);
-    let ret = YkExtraLinkObject::new(&path, SECTION_NAME);
-    fs::remove_file(path)?;
-
-    Ok(ret)
+    Ok(output.linkable())
 }
 
 /// Lazy computation of dominance frontiers.
