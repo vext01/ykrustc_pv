@@ -258,8 +258,8 @@ fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, mir: &Mir,
 }
 
 struct RenameCx {
-    count: usize,
-    stack: Vec<Vec<usize>>,
+    count: TirLocal,
+    stack: Vec<Vec<TirLocal>>,
 }
 
 impl RenameCx {
@@ -272,11 +272,11 @@ impl RenameCx {
 
     fn rename(&mut self, mir: &Mir, blks: &mut Vec<ykpack::BasicBlock>, bb: usize) {
         let blk = &mut blks[bb];
-        for st in blk.stmts.iter() {
+        for st in blk.stmts.iter_mut() {
             if !st.is_phi() {
-                for x in st.uses_vars().iter() {
-                    let i = self.stack[*x as usize].last().cloned();
-                    // XXX
+                for x in st.uses_vars_mut().iter_mut() {
+                    let i = self.stack[**x as usize].last().cloned().unwrap();
+                    **x = i;
                 }
             }
         }
