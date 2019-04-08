@@ -33,9 +33,11 @@ use std::cell::{Cell, RefCell};
 use std::mem::size_of;
 use rustc_data_structures::bit_set::BitSet;
 use rustc_data_structures::indexed_vec::{IndexVec, Idx};
-use rustc_data_structures::graph::dominators::DominatorFrontiers;
+use rustc_data_structures::graph::dominators::{Dominators, DominatorFrontiers};
+use rustc_data_structures::graph::WithSuccessors;
 use ykpack;
 use ykpack::LocalIndex as TirLocal;
+use ykpack::BasicBlockIndex as TirBasicBlockIndex;
 use rustc_data_structures::fx::FxHashSet;
 
 const SECTION_NAME: &'static str = ".yk_tir";
@@ -108,9 +110,10 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
         })
     }
 
-    /// Finalise the conversion context, returning the definition sites and block defines mappings.
-    fn done(self) -> (Vec<BitSet<BasicBlock>>, IndexVec<BasicBlock, FxHashSet<TirLocal>>) {
-        (self.def_sites.into_inner(), self.block_defines.into_inner())
+    /// Finalise the conversion context, returning the definition sites, the block defines mapping,
+    /// and the number of TIR variables.
+    fn done(self) -> (Vec<BitSet<BasicBlock>>, IndexVec<BasicBlock, FxHashSet<TirLocal>>, u32) {
+        (self.def_sites.into_inner(), self.block_defines.into_inner(), self.next_tir_var.into_inner())
     }
 
     /// Add `bb` as a definition site of the TIR variable `var`.
@@ -192,16 +195,16 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
             info!("generating TIR for {:?}", def_id);
 
             let mir = tcx.optimized_mir(*def_id);
+            let doms = mir.dominators();
             let ccx = ConvCx::new(tcx, mir);
 
             let mut pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
             {
                 let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
-                let (def_sites, block_defines) = ccx.done();
-                insert_phis(blocks, mir, def_sites, block_defines);
+                let (def_sites, block_defines, num_tir_vars) = ccx.done();
+                insert_phis(blocks, &doms, mir, def_sites, block_defines);
+                RenameCx::new(num_tir_vars).rename_all(&doms, &mir, blocks);
             }
-
-            // FIXME - rename variables with fresh SSA names.
 
             if let Some(ref mut e) = enc {
                 e.serialise(pack)?;
@@ -224,10 +227,9 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
 ///
 /// Algorithm reference:
 /// Bottom of p406 of 'Modern Compiler Implementation in Java (2nd ed.)' by Andrew Appel.
-fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, mir: &Mir,
-               mut def_sites: Vec<BitSet<BasicBlock>>,
+fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, doms: &Dominators<BasicBlock>,
+               mir: &Mir, mut def_sites: Vec<BitSet<BasicBlock>>,
                a_orig: IndexVec<BasicBlock, FxHashSet<TirLocal>>) {
-    let doms = mir.dominators();
     let df = DominatorFrontiers::new(mir, &doms);
     let num_tir_vars = def_sites.len();
     let num_tir_blks = a_orig.len();
@@ -257,27 +259,76 @@ fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, mir: &Mir,
     }
 }
 
+/// This is the variable renaming scheme outlined in Algorithm 19.7 on p409 of the Appel book. We
+/// do the renaming in-place. Appel computes a <original variable name, SSA version> pair for each
+/// new variable definition. For simplicity and efficiency we use a plain old integer. This just
+/// means we have one counter instead of many.
 struct RenameCx {
     count: TirLocal,
     stack: Vec<Vec<TirLocal>>,
 }
 
 impl RenameCx {
-    fn new(num_tir_vars: usize) -> Self {
+    fn new(num_tir_vars: u32) -> Self {
         Self {
             count: 0,
-            stack: vec![vec![0]; num_tir_vars],
+            stack: vec![vec![0]; num_tir_vars as usize],
         }
     }
 
-    fn rename(&mut self, mir: &Mir, blks: &mut Vec<ykpack::BasicBlock>, bb: usize) {
-        let blk = &mut blks[bb];
-        for st in blk.stmts.iter_mut() {
-            if !st.is_phi() {
-                for x in st.uses_vars_mut().iter_mut() {
-                    let i = self.stack[**x as usize].last().cloned().unwrap();
-                    **x = i;
+    fn rename_all(mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
+        blks: &mut Vec<ykpack::BasicBlock>)
+    {
+        self.rename(doms, mir, blks, 0); // We start with the entry block and it ripples down.
+    }
+
+    fn rename(&mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
+        blks: &mut Vec<ykpack::BasicBlock>, n: TirBasicBlockIndex)
+    {
+        let n_usize = n as usize;
+        {
+            let n_blk = &mut blks[n_usize];
+            for st in n_blk.stmts.iter_mut() {
+                if !st.is_phi() {
+                    for x in st.uses_vars_mut().iter_mut() {
+                        let i = self.stack[**x as usize].last().cloned().unwrap();
+                        **x = i;
+                    }
                 }
+
+                for a in st.defs_vars_mut().iter_mut() {
+                    self.count += 1;
+                    let i = self.count;
+                    self.stack[**a as usize].push(i);
+                    **a = i;
+                }
+            }
+        }
+
+        let n_idx = BasicBlock::new(n_usize);
+        for y in mir.successors(n_idx) {
+            for st in &mut blks[y.as_usize()].stmts {
+                // "Suppose n is the jth predecessor of y".
+                let j = mir.predecessors_for(y).iter().position(|b| b == &n_idx).unwrap();
+                // "Suppose the jth operand of the phi function is a".
+                match st.rhs_phi_var_mut(j) {
+                    Some(ref mut a) => {
+                        let i = self.stack[**a as usize].last().cloned().unwrap();
+                        **a = i;
+                    },
+                    None => (), // It wasn't a Phi. Do nothing.
+                }
+            }
+        }
+
+        for x in doms.immediately_dominates(n_idx) {
+            self.rename(doms, mir, blks, x.as_u32());
+        }
+
+        let n_blk = &mut blks[n_usize];
+        for s in n_blk.stmts.iter_mut() {
+            for a in s.defs_vars() {
+                self.stack[a as usize].pop();
             }
         }
     }

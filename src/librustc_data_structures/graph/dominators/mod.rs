@@ -118,6 +118,13 @@ impl<Node: Idx> Dominators<Node> {
         self.immediate_dominators[node].unwrap()
     }
 
+    /// Find the children of a node in the dominator tree.
+    pub fn immediately_dominates(&self, node: Node) -> Vec<Node> {
+        self.immediate_dominators.iter().enumerate()
+            .filter(|(_, d)| d.is_some() && d.unwrap() == node)
+            .map(|(i, _)| Node::new(i)).collect()
+    }
+
     pub fn dominators(&self, node: Node) -> Iter<'_, Node> {
         assert!(self.is_reachable(node), "node {:?} is not reachable", node);
         Iter {
