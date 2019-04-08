@@ -12,6 +12,8 @@
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
+#![allow(unused_variables,dead_code)]
+
 use rustc::ty::TyCtxt;
 
 use rustc::hir::def_id::DefId;
@@ -249,6 +251,32 @@ fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, mir: &Mir,
                         insert_phi(&mut blocks[y_usize], a as u32, mir.predecessors_for(y).len());
                         w.insert(y);
                     }
+                }
+            }
+        }
+    }
+}
+
+struct RenameCx {
+    count: usize,
+    stack: Vec<Vec<usize>>,
+}
+
+impl RenameCx {
+    fn new(num_tir_vars: usize) -> Self {
+        Self {
+            count: 0,
+            stack: vec![vec![0]; num_tir_vars],
+        }
+    }
+
+    fn rename(&mut self, mir: &Mir, blks: &mut Vec<ykpack::BasicBlock>, bb: usize) {
+        let blk = &mut blks[bb];
+        for st in blk.stmts.iter() {
+            if !st.is_phi() {
+                for x in st.uses_vars().iter() {
+                    let i = self.stack[*x as usize].last().cloned();
+                    // XXX
                 }
             }
         }
