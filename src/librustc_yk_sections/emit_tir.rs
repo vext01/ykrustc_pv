@@ -12,7 +12,7 @@
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
-#![allow(unused_variables,dead_code)]
+#![allow(unused_variables,dead_code,unused_imports)]
 
 use rustc::ty::TyCtxt;
 
@@ -31,6 +31,7 @@ use std::io::Write;
 use std::error::Error;
 use std::cell::{Cell, RefCell};
 use std::mem::size_of;
+use std::convert::TryFrom;
 use rustc_data_structures::bit_set::BitSet;
 use rustc_data_structures::indexed_vec::{IndexVec, Idx};
 use rustc_data_structures::graph::dominators::{Dominators, DominatorFrontiers};
@@ -259,20 +260,28 @@ fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, doms: &Dominators<BasicBloc
     }
 }
 
+type TirStatementIndex = usize;
+
+#[derive(Clone)]
+struct ReachLoc {
+    bb: BasicBlock,
+    si: TirStatementIndex,
+}
+
 /// This is the variable renaming scheme outlined in Algorithm 19.7 on p409 of the Appel book. We
 /// do the renaming in-place. Appel computes a <original variable name, SSA version> pair for each
 /// new variable definition. For simplicity and efficiency we use a plain old integer. This just
 /// means we have one counter instead of many.
 struct RenameCx {
-    count: TirLocal,
-    stack: Vec<Vec<TirLocal>>,
+    next_def: TirLocal,
+    reaching_defs: Vec<Option<(TirLocal, ReachLoc)>>,
 }
 
 impl RenameCx {
     fn new(num_tir_vars: u32) -> Self {
         Self {
-            count: 0,
-            stack: vec![vec![0]; num_tir_vars as usize],
+            next_def: 0,
+            reaching_defs: vec![None; num_tir_vars as usize],
         }
     }
 
@@ -286,58 +295,75 @@ impl RenameCx {
         blks: &mut Vec<ykpack::BasicBlock>, n: TirBasicBlockIndex)
     {
         info!("rename for {:?}", n);
-        let n_usize = n as usize;
-        {
-            let n_blk = &mut blks[n_usize];
-            for st in n_blk.stmts.iter_mut() {
-                if !st.is_phi() {
-                    for x in st.uses_vars_mut().iter_mut() {
-                        info!("array1");
-                        let i = self.stack[**x as usize].last().cloned().unwrap();
-                        **x = i;
-                    }
-                }
+        // let n_usize = n as usize;
+        // {
+        //     let n_blk = &mut blks[n_usize];
+        //     for st in n_blk.stmts.iter_mut() {
+        //         if !st.is_phi() {
+        //             for x in st.uses_vars_mut().iter_mut() {
+        //                 info!("array1");
+        //                 let i = self.stack[**x as usize].last().cloned().unwrap();
+        //                 **x = i;
+        //             }
+        //         }
 
-                for a in st.defs_vars_mut().iter_mut() {
-                    self.count += 1;
-                    let i = self.count;
-                    info!("array2");
-                    self.stack[**a as usize].push(i);
-                    **a = i;
-                }
+        //         for a in st.defs_vars_mut().iter_mut() {
+        //             self.count += 1;
+        //             let i = self.count;
+        //             info!("array2");
+        //             self.stack[**a as usize].push(i);
+        //             **a = i;
+        //         }
+        //     }
+        // }
+
+        // let n_idx = BasicBlock::new(n_usize);
+        // for y in mir.successors(n_idx) {
+        //     // "Suppose n is the jth predecessor of y".
+        //     let j = mir.predecessors_for(y).iter().position(|b| b == &n_idx).unwrap();
+        //     info!("array3");
+        //     for st in &mut blks[y.as_usize()].stmts {
+        //         // "Suppose the jth operand of the phi function is a".
+        //         match st.rhs_phi_var_mut(j) {
+        //             Some(ref mut a) => {
+        //                 info!("array4");
+        //                 let i = self.stack[**a as usize].last().cloned().unwrap();
+        //                 **a = i;
+        //             },
+        //             None => (), // It wasn't a Phi. Do nothing.
+        //         }
+        //     }
+        // }
+
+        // fn update_reaching_def(&mut self, v: TirLocal, 
+
+        // info!("array5");
+        // // "Depth-first search preorder traversal of the dominator tree".
+        // for x in doms.immediately_dominates(n_idx) {
+        //     self.rename(doms, mir, blks, x.as_u32());
+        // }
+    }
+
+    fn update_reaching_def(&mut self, doms: &Dominators<BasicBlock>, v: TirLocal, i: &ReachLoc) {
+        let v_usize = usize::try_from(v).unwrap();
+        let r = {
+            let mut r = &self.reaching_defs[v_usize];
+            while !(r.is_none() || Self::def_dominates(doms, &r.as_ref().unwrap().1, i)) {
+                r = &self.reaching_defs[usize::try_from(r.as_ref().unwrap().0).unwrap()];
             }
-        }
+            r.clone()
+        };
+        self.reaching_defs[v_usize] = r;
+    }
 
-        let n_idx = BasicBlock::new(n_usize);
-        for y in mir.successors(n_idx) {
-            // "Suppose n is the jth predecessor of y".
-            let j = mir.predecessors_for(y).iter().position(|b| b == &n_idx).unwrap();
-            info!("array3");
-            for st in &mut blks[y.as_usize()].stmts {
-                // "Suppose the jth operand of the phi function is a".
-                match st.rhs_phi_var_mut(j) {
-                    Some(ref mut a) => {
-                        info!("array4");
-                        let i = self.stack[**a as usize].last().cloned().unwrap();
-                        **a = i;
-                    },
-                    None => (), // It wasn't a Phi. Do nothing.
-                }
-            }
-        }
-
-        info!("array5");
-        for x in doms.immediately_dominates(n_idx) {
-            self.rename(doms, mir, blks, x.as_u32());
-        }
-
-        info!("array6");
-        let n_blk = &mut blks[n_usize];
-        for s in n_blk.stmts.iter() {
-            for a in s.defs_vars() {
-                info!("array7");
-                self.stack[a as usize].pop();
-            }
+    // Does a definition at `r` dominate the instruction `i`?
+    fn def_dominates(doms: &Dominators<BasicBlock>, r: &ReachLoc, i: &ReachLoc) -> bool {
+        if r.bb == i.bb {
+            // If the locations are in the same block, `r` dominates if it comes before `i`.
+            r.si <= i.si
+        } else {
+            // The locations are in different blocks, so ask the CFG which block dominates.
+            doms.is_dominated_by(i.bb, r.bb)
         }
     }
 }
