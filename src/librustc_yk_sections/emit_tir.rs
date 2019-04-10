@@ -285,12 +285,14 @@ impl RenameCx {
     fn rename(&mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
         blks: &mut Vec<ykpack::BasicBlock>, n: TirBasicBlockIndex)
     {
+        info!("rename for {:?}", n);
         let n_usize = n as usize;
         {
             let n_blk = &mut blks[n_usize];
             for st in n_blk.stmts.iter_mut() {
                 if !st.is_phi() {
                     for x in st.uses_vars_mut().iter_mut() {
+                        info!("array1");
                         let i = self.stack[**x as usize].last().cloned().unwrap();
                         **x = i;
                     }
@@ -299,6 +301,7 @@ impl RenameCx {
                 for a in st.defs_vars_mut().iter_mut() {
                     self.count += 1;
                     let i = self.count;
+                    info!("array2");
                     self.stack[**a as usize].push(i);
                     **a = i;
                 }
@@ -307,12 +310,14 @@ impl RenameCx {
 
         let n_idx = BasicBlock::new(n_usize);
         for y in mir.successors(n_idx) {
+            // "Suppose n is the jth predecessor of y".
+            let j = mir.predecessors_for(y).iter().position(|b| b == &n_idx).unwrap();
+            info!("array3");
             for st in &mut blks[y.as_usize()].stmts {
-                // "Suppose n is the jth predecessor of y".
-                let j = mir.predecessors_for(y).iter().position(|b| b == &n_idx).unwrap();
                 // "Suppose the jth operand of the phi function is a".
                 match st.rhs_phi_var_mut(j) {
                     Some(ref mut a) => {
+                        info!("array4");
                         let i = self.stack[**a as usize].last().cloned().unwrap();
                         **a = i;
                     },
@@ -321,13 +326,16 @@ impl RenameCx {
             }
         }
 
+        info!("array5");
         for x in doms.immediately_dominates(n_idx) {
             self.rename(doms, mir, blks, x.as_u32());
         }
 
+        info!("array6");
         let n_blk = &mut blks[n_usize];
-        for s in n_blk.stmts.iter_mut() {
+        for s in n_blk.stmts.iter() {
             for a in s.defs_vars() {
+                info!("array7");
                 self.stack[a as usize].pop();
             }
         }

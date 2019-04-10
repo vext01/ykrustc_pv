@@ -120,7 +120,7 @@ impl<Node: Idx> Dominators<Node> {
 
     /// Find the children of a node in the dominator tree.
     pub fn immediately_dominates(&self, node: Node) -> Vec<Node> {
-        self.immediate_dominators.iter().enumerate()
+        self.immediate_dominators.iter().enumerate().skip(1)
             .filter(|(_, d)| d.is_some() && d.unwrap() == node)
             .map(|(i, _)| Node::new(i)).collect()
     }
@@ -138,8 +138,8 @@ impl<Node: Idx> Dominators<Node> {
         self.dominators(node).any(|n| n == dom)
     }
 
-    #[cfg(test)]
-    fn all_immediate_dominators(&self) -> &IndexVec<Node, Option<Node>> {
+    //#[cfg(test)]
+    pub fn all_immediate_dominators(&self) -> &IndexVec<Node, Option<Node>> {
         &self.immediate_dominators
     }
 }
