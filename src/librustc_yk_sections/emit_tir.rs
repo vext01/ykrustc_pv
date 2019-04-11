@@ -13,6 +13,7 @@
 //! Serialisation itself is performed by an external library: ykpack.
 
 #![allow(unused_variables,dead_code,unused_imports)]
+//#![feature(vec_resize_default)]
 
 use rustc::ty::TyCtxt;
 
@@ -192,6 +193,7 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
     sorted_def_ids.sort();
 
     for def_id in sorted_def_ids {
+        info!("Def Id: {:?}", def_id);
         if tcx.is_mir_available(*def_id) {
             info!("generating TIR for {:?}", def_id);
 
@@ -199,14 +201,20 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
             let doms = mir.dominators();
             let ccx = ConvCx::new(tcx, mir);
 
+            info!("generate pre-ssa TIR");
             let mut pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
             {
                 let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
                 let (def_sites, block_defines, num_tir_vars) = ccx.done();
+
+                info!("insert PHIs");
                 insert_phis(blocks, &doms, mir, def_sites, block_defines);
+
+                info!("rename vars");
                 RenameCx::new(num_tir_vars).rename_all(&doms, &mir, blocks);
             }
 
+            info!("write");
             if let Some(ref mut e) = enc {
                 e.serialise(pack)?;
             } else {
@@ -262,9 +270,9 @@ fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, doms: &Dominators<BasicBloc
 
 type TirStatementIndex = usize;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ReachLoc {
-    bb: BasicBlock,
+    bb: TirBasicBlockIndex,
     si: TirStatementIndex,
 }
 
@@ -273,16 +281,26 @@ struct ReachLoc {
 /// new variable definition. For simplicity and efficiency we use a plain old integer. This just
 /// means we have one counter instead of many.
 struct RenameCx {
-    next_def: TirLocal,
+    next_fresh_var: TirLocal,
     reaching_defs: Vec<Option<(TirLocal, ReachLoc)>>,
 }
 
 impl RenameCx {
     fn new(num_tir_vars: u32) -> Self {
         Self {
-            next_def: 0,
+            next_fresh_var: 0,
+            // We will use at least as many variables as there are in the incoming TIR.
             reaching_defs: vec![None; num_tir_vars as usize],
         }
+    }
+
+    fn fresh_var(&mut self) -> TirLocal {
+        let ret = self.next_fresh_var;
+        self.next_fresh_var.checked_add(1);
+        if self.reaching_defs.len() < usize::try_from(self.next_fresh_var).unwrap() {
+            self.reaching_defs.resize_with(usize::try_from(self.next_fresh_var).unwrap(), || None);
+        }
+        ret
     }
 
     fn rename_all(mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
@@ -292,78 +310,101 @@ impl RenameCx {
     }
 
     fn rename(&mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
-        blks: &mut Vec<ykpack::BasicBlock>, n: TirBasicBlockIndex)
+        blks: &mut Vec<ykpack::BasicBlock>, bb: TirBasicBlockIndex)
     {
-        info!("rename for {:?}", n);
-        // let n_usize = n as usize;
-        // {
-        //     let n_blk = &mut blks[n_usize];
-        //     for st in n_blk.stmts.iter_mut() {
-        //         if !st.is_phi() {
-        //             for x in st.uses_vars_mut().iter_mut() {
-        //                 info!("array1");
-        //                 let i = self.stack[**x as usize].last().cloned().unwrap();
-        //                 **x = i;
-        //             }
-        //         }
+        info!("rename for {:?}", bb);
 
-        //         for a in st.defs_vars_mut().iter_mut() {
-        //             self.count += 1;
-        //             let i = self.count;
-        //             info!("array2");
-        //             self.stack[**a as usize].push(i);
-        //             **a = i;
-        //         }
-        //     }
-        // }
+        let bb_usize = usize::try_from(bb).unwrap();
+        {
+            for (i_idx, i) in &mut blks[bb_usize].stmts.iter_mut().enumerate() {
+                info!("block {}", i_idx);
+                info!("{:?}", i);
+                let i_loc = ReachLoc{bb: bb, si: i_idx};
+                if !i.is_phi() {
+                    for v in i.uses_vars_mut().iter_mut() {
+                        self.update_reaching_def(doms, **v, &i_loc);
+                        **v = self.reaching_defs[usize::try_from(**v).unwrap()].as_ref().unwrap().0;
+                    }
+                }
 
-        // let n_idx = BasicBlock::new(n_usize);
-        // for y in mir.successors(n_idx) {
-        //     // "Suppose n is the jth predecessor of y".
-        //     let j = mir.predecessors_for(y).iter().position(|b| b == &n_idx).unwrap();
-        //     info!("array3");
-        //     for st in &mut blks[y.as_usize()].stmts {
-        //         // "Suppose the jth operand of the phi function is a".
-        //         match st.rhs_phi_var_mut(j) {
-        //             Some(ref mut a) => {
-        //                 info!("array4");
-        //                 let i = self.stack[**a as usize].last().cloned().unwrap();
-        //                 **a = i;
-        //             },
-        //             None => (), // It wasn't a Phi. Do nothing.
-        //         }
-        //     }
-        // }
+                info!("phase 2");
+                for v in i.defs_vars_mut().iter_mut() {
+                    info!("v={:?}", v);
+                    let v_usize = usize::try_from(**v).unwrap();
+                    info!("v_usize={:?}", v_usize);
+                    self.update_reaching_def(doms, **v, &i_loc);
+                    info!("ok");
+                    let vp = self.fresh_var();
+                    info!("fresh_var={:?}", vp);
+                    **v = vp;
+                    info!("**v={:?}", **v);
+                    self.reaching_defs[usize::try_from(vp).unwrap()] = self.reaching_defs[v_usize].take();
+                    info!("def_up1: {:?}", self.reaching_defs[usize::try_from(vp).unwrap()]);
+                    self.reaching_defs[v_usize] = Some((vp, i_loc.clone()));
+                    info!("def_up2: {:?}", self.reaching_defs[v_usize]);
+                }
+            }
+        }
 
-        // fn update_reaching_def(&mut self, v: TirLocal, 
-
-        // info!("array5");
-        // // "Depth-first search preorder traversal of the dominator tree".
-        // for x in doms.immediately_dominates(n_idx) {
-        //     self.rename(doms, mir, blks, x.as_u32());
-        // }
+        info!("phase 3");
+        for succ in mir.successors(BasicBlock::from_u32(bb)) {
+            let succ_usize = succ.as_usize(); //usize::try_from(succ).unwrap();
+            for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
+                .filter(|(_, i)| i.is_phi())
+            {
+                let phi_loc = ReachLoc{bb: succ.as_u32(), si: phi_idx};
+                for v in phi.uses_vars_mut() {
+                    self.update_reaching_def(doms, *v, &phi_loc);
+                    *v = self.reaching_defs[usize::try_from(*v).unwrap()].as_ref().unwrap().0;
+                }
+            }
+        }
     }
 
     fn update_reaching_def(&mut self, doms: &Dominators<BasicBlock>, v: TirLocal, i: &ReachLoc) {
+        info!("update reaching: {}, {:?}", v, i);
         let v_usize = usize::try_from(v).unwrap();
+        info!("unwrapped1");
         let r = {
             let mut r = &self.reaching_defs[v_usize];
-            while !(r.is_none() || Self::def_dominates(doms, &r.as_ref().unwrap().1, i)) {
-                r = &self.reaching_defs[usize::try_from(r.as_ref().unwrap().0).unwrap()];
+            // In the SSA book, this is `while not(r == ⊥ or definition(r) dominates i`.
+            // We've applied De-Morgan's Theorem do avoid unwrapping `None` (in the case of ⊥) in
+            // the second half of the condition.
+            //while !r.is_none() && !Self::def_dominates(doms, &r.as_ref().unwrap().1, i) {
+            while let Some(ref r_inner) = r {
+                info!("loop pre: {:?}", r);
+                if !Self::def_dominates(doms, &r_inner.1, i) {
+                    break;
+                }
+
+                info!("loop");
+                //let iii = r.as_ref().unwrap().0;
+                let iii = r_inner.0;
+                info!("unwrapped2");
+                r = &self.reaching_defs[usize::try_from(iii).unwrap()];
+                info!("unwrapped3");
+                //r = &self.reaching_defs[usize::try_from(r.as_ref().unwrap().0).unwrap()];
             }
+            info!("loop_done");
             r.clone()
         };
+        info!("done updating defs: {:?}", r);
         self.reaching_defs[v_usize] = r;
+        info!("donex");
     }
 
     // Does a definition at `r` dominate the instruction `i`?
     fn def_dominates(doms: &Dominators<BasicBlock>, r: &ReachLoc, i: &ReachLoc) -> bool {
+        info!("def_dominates: {:?}, {:?}", r, i);
+        info!("{:?}", doms.all_immediate_dominators());
         if r.bb == i.bb {
             // If the locations are in the same block, `r` dominates if it comes before `i`.
+            info!("{:?}", r.si <= i.si);
             r.si <= i.si
         } else {
             // The locations are in different blocks, so ask the CFG which block dominates.
-            doms.is_dominated_by(i.bb, r.bb)
+            info!("{:?}", doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb)));
+            doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb))
         }
     }
 }
