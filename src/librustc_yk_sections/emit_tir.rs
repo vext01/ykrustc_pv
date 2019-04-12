@@ -68,20 +68,37 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     var_map: RefCell<IndexVec<Local, Option<TirLocal>>>,
     /// The number of blocks in the MIR (and therefore in the TIR).
     num_blks: usize,
+    /// FIXME
+    mir_args: Vec<Local>,
+    //num_args: usize,
 }
 
 impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
     fn new(tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, mir: &Mir<'tcx>) -> Self {
-        let var_map = IndexVec::new();
         let num_blks = mir.basic_blocks().len();
+        //let mut next_tir_var = 0;
+
+        // Return value has to be in a place where we can find it later.
+        //var_map.push(0);
+
+        // FIXME document invariant.
+        // let args_iter = mir.args_iter();
+        // let num_args = args_iter.clone().count();
+        // let mut var_map = IndexVec::from([None; num_args]);
+        // for mir_arg in args_iter {
+        //     var_map[mir_arg] = next_tir_var;
+        //     next_tir_var += 1;
+        // }
+        //
 
         Self {
             tcx,
             def_sites: RefCell::new(Vec::new()),
             block_defines: RefCell::new(IndexVec::from_elem_n(FxHashSet::default(), num_blks)),
-            next_tir_var: Cell::new(0),
-            var_map: RefCell::new(var_map),
+            next_tir_var: Cell::new(1), // Zero is always the return value in pre-SSA TIR.
+            var_map: RefCell::new(IndexVec::from_elem_n(Some(0), 1)), // Pre-filled with return value.
             num_blks: num_blks,
+            mir_args: mir.args_iter().collect(), // FIXME could be optimised.
         }
     }
 
@@ -290,6 +307,7 @@ impl RenameCx {
         Self {
             next_fresh_var: 0,
             // We will use at least as many variables as there are in the incoming TIR.
+            // FIXME plus one
             reaching_defs: vec![None; num_tir_vars as usize],
         }
     }
@@ -316,18 +334,29 @@ impl RenameCx {
 
         let bb_usize = usize::try_from(bb).unwrap();
         {
+            info!("block {}: {}", bb, blks[bb_usize]);
+        }
+
+        {
             for (i_idx, i) in &mut blks[bb_usize].stmts.iter_mut().enumerate() {
-                info!("block {}", i_idx);
-                info!("{:?}", i);
+                info!("\nstatement {}: {}", i_idx, i);
                 let i_loc = ReachLoc{bb: bb, si: i_idx};
+
+                info!("PHASE: non-phi uses");
                 if !i.is_phi() {
                     for v in i.uses_vars_mut().iter_mut() {
+                        info!("var {:?}", v);
                         self.update_reaching_def(doms, **v, &i_loc);
-                        **v = self.reaching_defs[usize::try_from(**v).unwrap()].as_ref().unwrap().0;
+                        info!("up reaches done {:?}", v);
+                        let upd_var = match self.reaching_defs[usize::try_from(**v).unwrap()] {
+                            Some(ref d) => d.0,
+                            None => 0, // FIXME expain
+                        };
+                        **v = upd_var;
                     }
                 }
 
-                info!("phase 2");
+                info!("PHASE: defs");
                 for v in i.defs_vars_mut().iter_mut() {
                     info!("v={:?}", v);
                     let v_usize = usize::try_from(**v).unwrap();
@@ -346,7 +375,7 @@ impl RenameCx {
             }
         }
 
-        info!("phase 3");
+        info!("PHASE: successors");
         for succ in mir.successors(BasicBlock::from_u32(bb)) {
             let succ_usize = succ.as_usize(); //usize::try_from(succ).unwrap();
             for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
@@ -370,24 +399,26 @@ impl RenameCx {
             // In the SSA book, this is `while not(r == ⊥ or definition(r) dominates i`.
             // We've applied De-Morgan's Theorem do avoid unwrapping `None` (in the case of ⊥) in
             // the second half of the condition.
-            //while !r.is_none() && !Self::def_dominates(doms, &r.as_ref().unwrap().1, i) {
-            while let Some(ref r_inner) = r {
-                info!("loop pre: {:?}", r);
-                if !Self::def_dominates(doms, &r_inner.1, i) {
-                    break;
-                }
+            info!("loop pre: {:?}", r);
+            while !(r.is_none() || Self::def_dominates(doms, &r.as_ref().unwrap().1, i)) {
+            // while let Some(ref r_inner) = r {
+            //     info!("loop pre: {:?}", r);
+            //     if !Self::def_dominates(doms, &r_inner.1, i) {
+            //         break;
+            //     }
 
-                info!("loop");
-                //let iii = r.as_ref().unwrap().0;
-                let iii = r_inner.0;
+                info!("top of loop: {:?}", r);
+                let iii = r.as_ref().unwrap().0;
+                //let iii = r_inner.0;
                 info!("unwrapped2");
                 r = &self.reaching_defs[usize::try_from(iii).unwrap()];
                 info!("unwrapped3");
                 //r = &self.reaching_defs[usize::try_from(r.as_ref().unwrap().0).unwrap()];
             }
-            info!("loop_done");
+            info!("loop_done: {:?}", r);
             r.clone()
         };
+        // FIXME IS THIS COMING OUT NONE WHEN IT SHOULDNT???
         info!("done updating defs: {:?}", r);
         self.reaching_defs[v_usize] = r;
         info!("donex");
@@ -466,7 +497,7 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
             },
             TerminatorKind::Resume => ykpack::Terminator::Resume,
             TerminatorKind::Abort => ykpack::Terminator::Abort,
-            TerminatorKind::Return => ykpack::Terminator::Return,
+            TerminatorKind::Return => ykpack::Terminator::Return(0),
             TerminatorKind::Unreachable => ykpack::Terminator::Unreachable,
             TerminatorKind::Drop{target: target_bb, unwind: unwind_bb, ..} =>
                 ykpack::Terminator::Drop{
@@ -521,9 +552,18 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for
 {
     fn to_pack(&mut self) -> ykpack::BasicBlock {
         let (ccx, bb, bb_data) = self;
-        let ser_stmts = bb_data.statements.iter().map(|stmt| (*ccx, *bb, stmt).to_pack());
-        ykpack::BasicBlock::new(ser_stmts.collect(),
-            (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
+        let mut ser_stmts = Vec::new();
+
+        // FIXME comment
+        if bb.as_u32() == 0 {
+            ser_stmts.push(ykpack::Statement::DefArg(0)); // FIXME say why
+            for a in &ccx.mir_args {
+                ser_stmts.push(ykpack::Statement::DefArg(ccx.tir_var(*a)));
+            }
+        }
+
+        ser_stmts.extend(bb_data.statements.iter().map(|stmt| (*ccx, *bb, stmt).to_pack()));
+        ykpack::BasicBlock::new(ser_stmts, (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
     }
 }
 
