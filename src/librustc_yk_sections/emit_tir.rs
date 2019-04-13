@@ -95,8 +95,8 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
             tcx,
             def_sites: RefCell::new(Vec::new()),
             block_defines: RefCell::new(IndexVec::from_elem_n(FxHashSet::default(), num_blks)),
-            next_tir_var: Cell::new(0), // Zero is always the return value in pre-SSA TIR.
-            var_map: RefCell::new(IndexVec::new()), // from_elem_n(Some(0), 1)), // Pre-filled with return value.
+            next_tir_var: Cell::new(1), // Zero is always the return value in pre-SSA TIR.
+            var_map: RefCell::new(IndexVec::from_elem_n(Some(0), 1)), // Pre-filled with return value.
             num_blks: num_blks,
             mir_args: mir.args_iter().collect(), // FIXME could be optimised.
         }
@@ -122,14 +122,11 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
             var_map.resize(local_u32.checked_add(1).unwrap() as usize, None);
         }
 
-        let ret = var_map[local].unwrap_or_else(|| {
+        var_map[local].unwrap_or_else(|| {
             let var_idx = self.new_tir_var();
             var_map[local] = Some(var_idx);
             var_idx
-        });
-
-        info!("Fresh TIR var {:?} -> {:?}", local, ret);
-        ret
+        })
     }
 
     /// Finalise the conversion context, returning the definition sites, the block defines mapping,
@@ -227,14 +224,14 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
                 let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
                 let (def_sites, block_defines, num_tir_vars) = ccx.done();
 
-                info!("insert PHIs for: {:?}", def_id);
+                info!("insert PHIs");
                 insert_phis(blocks, &doms, mir, def_sites, block_defines);
 
-                info!("rename vars for {:?}", def_id);
+                info!("rename vars");
                 RenameCx::new(num_tir_vars).rename_all(&doms, &mir, blocks);
             }
 
-            info!("serialise for {:?}", def_id);
+            info!("write");
             if let Some(ref mut e) = enc {
                 e.serialise(pack)?;
             } else {
@@ -307,18 +304,17 @@ struct RenameCx {
 
 impl RenameCx {
     fn new(num_tir_vars: u32) -> Self {
-        // We will use at least as many variables as there are in the incoming TIR.
-        // Plus one for the uninitialised read variable.
-        let init_size = num_tir_vars.checked_add(1).unwrap();
         Self {
             next_fresh_var: 0,
-            reaching_defs: vec![None; usize::try_from(init_size).unwrap()],
+            // We will use at least as many variables as there are in the incoming TIR.
+            // FIXME plus one
+            reaching_defs: vec![None; num_tir_vars as usize],
         }
     }
 
     fn fresh_var(&mut self) -> TirLocal {
         let ret = self.next_fresh_var;
-        self.next_fresh_var = self.next_fresh_var.checked_add(1).unwrap();
+        self.next_fresh_var.checked_add(1);
         if self.reaching_defs.len() < usize::try_from(self.next_fresh_var).unwrap() {
             self.reaching_defs.resize_with(usize::try_from(self.next_fresh_var).unwrap(), || None);
         }
@@ -328,8 +324,6 @@ impl RenameCx {
     fn rename_all(mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
         blks: &mut Vec<ykpack::BasicBlock>)
     {
-        // Traverse the dominator tree in depth-first pre-order renaming as we go.
-        // This is recursive for now, but it wouldn't be too hard to sequentialise.
         self.rename(doms, mir, blks, 0); // We start with the entry block and it ripples down.
     }
 
@@ -390,18 +384,9 @@ impl RenameCx {
                 let phi_loc = ReachLoc{bb: succ.as_u32(), si: phi_idx};
                 for v in phi.uses_vars_mut() {
                     self.update_reaching_def(doms, *v, &phi_loc);
-                    //*v = self.reaching_defs[usize::try_from(*v).unwrap()].as_ref().unwrap().0;
-                    let upd_var = match self.reaching_defs[usize::try_from(*v).unwrap()] {
-                        Some(ref d) => d.0,
-                        None => 0, // FIXME comment why.
-                    };
-                    *v = upd_var;
+                    *v = self.reaching_defs[usize::try_from(*v).unwrap()].as_ref().unwrap().0;
                 }
             }
-        }
-
-        for next_bb in doms.immediately_dominates(BasicBlock::from_u32(bb)) {
-            self.rename(doms, mir, blks, next_bb.as_u32());
         }
     }
 
@@ -423,7 +408,6 @@ impl RenameCx {
             //     }
 
                 info!("top of loop: {:?}", r);
-                info!("reaches: {:?}", self.reaching_defs);
                 let iii = r.as_ref().unwrap().0;
                 //let iii = r_inner.0;
                 info!("unwrapped2");
@@ -572,10 +556,8 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for
 
         // FIXME comment
         if bb.as_u32() == 0 {
-            info!("Predefining...");
-            ser_stmts.push(ykpack::Statement::DefArg(ccx.tir_var(Local::new(0)))); // FIXME say why: rv
+            ser_stmts.push(ykpack::Statement::DefArg(0)); // FIXME say why
             for a in &ccx.mir_args {
-                info!("Predefining arg {:?}", a);
                 ser_stmts.push(ykpack::Statement::DefArg(ccx.tir_var(*a)));
             }
         }
