@@ -54,6 +54,9 @@ pub enum TirMode {
     TextDump(PathBuf),
 }
 
+static BOTTOM: u32 = 0;
+static PRE_SSA_RET_VAR: u32 = 1;
+
 /// A conversion context holds the state needed to perform the conversion to (pre-SSA) TIR.
 struct ConvCx<'a, 'tcx, 'gcx> {
     /// The compiler's god struct. Needed for queries etc.
@@ -95,8 +98,8 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
             tcx,
             def_sites: RefCell::new(Vec::new()),
             block_defines: RefCell::new(IndexVec::from_elem_n(FxHashSet::default(), num_blks)),
-            next_tir_var: Cell::new(1), // Zero is always the return value in pre-SSA TIR.
-            var_map: RefCell::new(IndexVec::from_elem_n(Some(0), 1)), // Pre-filled with return value.
+            next_tir_var: Cell::new(2), // Zero is always the return value in pre-SSA TIR. FIXME say why.
+            var_map: RefCell::new(IndexVec::from_elem_n(Some(PRE_SSA_RET_VAR), 1)), // Pre-filled with return value.
             num_blks: num_blks,
             mir_args: mir.args_iter().collect(), // FIXME could be optimised.
         }
@@ -299,16 +302,18 @@ struct ReachLoc {
 /// means we have one counter instead of many.
 struct RenameCx {
     next_fresh_var: TirLocal,
-    reaching_defs: Vec<Option<(TirLocal, ReachLoc)>>,
+    reaching_defs: Vec<(TirLocal, ReachLoc)>,
 }
+
+const DUMMY_REACH_LOC: ReachLoc = ReachLoc {bb: 0, si: 0};
 
 impl RenameCx {
     fn new(num_tir_vars: u32) -> Self {
         Self {
-            next_fresh_var: 0,
+            next_fresh_var: 1,
             // We will use at least as many variables as there are in the incoming TIR.
             // FIXME plus one
-            reaching_defs: vec![None; num_tir_vars as usize],
+            reaching_defs: vec![(BOTTOM, DUMMY_REACH_LOC); num_tir_vars as usize],
         }
     }
 
@@ -316,7 +321,7 @@ impl RenameCx {
         let ret = self.next_fresh_var;
         self.next_fresh_var.checked_add(1);
         if self.reaching_defs.len() < usize::try_from(self.next_fresh_var).unwrap() {
-            self.reaching_defs.resize_with(usize::try_from(self.next_fresh_var).unwrap(), || None);
+            self.reaching_defs.resize_with(usize::try_from(self.next_fresh_var).unwrap(), || (BOTTOM, DUMMY_REACH_LOC));
         }
         ret
     }
@@ -324,6 +329,13 @@ impl RenameCx {
     fn rename_all(mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
         blks: &mut Vec<ykpack::BasicBlock>)
     {
+        info!("rename all");
+        info!("blks:");
+
+        for (i, b) in blks.iter().enumerate() {
+            info!("\nbb{}:\n{:?}", i, b);
+        }
+
         self.rename(doms, mir, blks, 0); // We start with the entry block and it ripples down.
     }
 
@@ -345,37 +357,31 @@ impl RenameCx {
                 info!("PHASE: non-phi uses");
                 if !i.is_phi() {
                     for v in i.uses_vars_mut().iter_mut() {
-                        info!("var {:?}", v);
+                        info!("uses var {:?}", v);
                         self.update_reaching_def(doms, **v, &i_loc);
-                        info!("up reaches done {:?}", v);
-                        let upd_var = match self.reaching_defs[usize::try_from(**v).unwrap()] {
-                            Some(ref d) => d.0,
-                            None => 0, // FIXME expain
-                        };
-                        **v = upd_var;
+                        **v = self.reaching_defs[usize::try_from(**v).unwrap()].0;
                     }
                 }
 
                 info!("PHASE: defs");
                 for v in i.defs_vars_mut().iter_mut() {
-                    info!("v={:?}", v);
-                    let v_usize = usize::try_from(**v).unwrap();
-                    info!("v_usize={:?}", v_usize);
+                    info!("defs var={:?}", v);
                     self.update_reaching_def(doms, **v, &i_loc);
-                    info!("ok");
+
                     let vp = self.fresh_var();
                     info!("fresh_var={:?}", vp);
+
+                    let vp_usize = usize::try_from(vp).unwrap();
+                    let v_usize = usize::try_from(**v).unwrap();
+
                     **v = vp;
-                    info!("**v={:?}", **v);
-                    self.reaching_defs[usize::try_from(vp).unwrap()] = self.reaching_defs[v_usize].take();
-                    info!("def_up1: {:?}", self.reaching_defs[usize::try_from(vp).unwrap()]);
-                    self.reaching_defs[v_usize] = Some((vp, i_loc.clone()));
-                    info!("def_up2: {:?}", self.reaching_defs[v_usize]);
+                    self.reaching_defs[vp_usize] = self.reaching_defs[v_usize].clone();
+                    self.reaching_defs[v_usize] = (vp, i_loc.clone());
                 }
             }
         }
 
-        info!("PHASE: successors");
+        info!("PHASE: successors for {:?}: {:?}", bb, mir.successors(BasicBlock::from_u32(bb)));
         for succ in mir.successors(BasicBlock::from_u32(bb)) {
             let succ_usize = succ.as_usize(); //usize::try_from(succ).unwrap();
             for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
@@ -384,9 +390,15 @@ impl RenameCx {
                 let phi_loc = ReachLoc{bb: succ.as_u32(), si: phi_idx};
                 for v in phi.uses_vars_mut() {
                     self.update_reaching_def(doms, *v, &phi_loc);
-                    *v = self.reaching_defs[usize::try_from(*v).unwrap()].as_ref().unwrap().0;
+                    *v = self.reaching_defs[usize::try_from(*v).unwrap()].0;
                 }
             }
+        }
+
+        info!("PHASE: recurse for {:?}: {:?}", bb, doms.immediately_dominates(BasicBlock::from_u32(bb)));
+        info!("DOM TREE: {:?}", doms.all_immediate_dominators());
+        for next_bb in doms.immediately_dominates(BasicBlock::from_u32(bb)) {
+            self.rename(doms, mir, blks, next_bb.as_u32());
         }
     }
 
@@ -394,33 +406,27 @@ impl RenameCx {
         info!("update reaching: {}, {:?}", v, i);
         let v_usize = usize::try_from(v).unwrap();
         info!("unwrapped1");
-        let r = {
+        let r_final = {
             let mut r = &self.reaching_defs[v_usize];
             // In the SSA book, this is `while not(r == ⊥ or definition(r) dominates i`.
             // We've applied De-Morgan's Theorem do avoid unwrapping `None` (in the case of ⊥) in
             // the second half of the condition.
             info!("loop pre: {:?}", r);
-            while !(r.is_none() || Self::def_dominates(doms, &r.as_ref().unwrap().1, i)) {
-            // while let Some(ref r_inner) = r {
-            //     info!("loop pre: {:?}", r);
-            //     if !Self::def_dominates(doms, &r_inner.1, i) {
-            //         break;
-            //     }
-
+            //while !(r.0 == BOTTOM || Self::def_dominates(doms, &r.1, i)) {
+            while !(r.0 == BOTTOM || Self::def_dominates(doms, &r.1, i)) {
                 info!("top of loop: {:?}", r);
-                let iii = r.as_ref().unwrap().0;
-                //let iii = r_inner.0;
-                info!("unwrapped2");
-                r = &self.reaching_defs[usize::try_from(iii).unwrap()];
+                info!("reaching_defs: {:?}", self.reaching_defs);
+                let old_r0 = r.0;
+                r = &self.reaching_defs[usize::try_from(r.0).unwrap()];
                 info!("unwrapped3");
+                assert!(r.0 != old_r0, "detected cycle in update_reaching_def");
                 //r = &self.reaching_defs[usize::try_from(r.as_ref().unwrap().0).unwrap()];
             }
             info!("loop_done: {:?}", r);
             r.clone()
         };
-        // FIXME IS THIS COMING OUT NONE WHEN IT SHOULDNT???
-        info!("done updating defs: {:?}", r);
-        self.reaching_defs[v_usize] = r;
+        info!("done updating defs. new one is: {:?}", r_final);
+        self.reaching_defs[v_usize] = r_final;
         info!("donex");
     }
 
@@ -497,7 +503,7 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
             },
             TerminatorKind::Resume => ykpack::Terminator::Resume,
             TerminatorKind::Abort => ykpack::Terminator::Abort,
-            TerminatorKind::Return => ykpack::Terminator::Return(0),
+            TerminatorKind::Return => ykpack::Terminator::Return(PRE_SSA_RET_VAR),
             TerminatorKind::Unreachable => ykpack::Terminator::Unreachable,
             TerminatorKind::Drop{target: target_bb, unwind: unwind_bb, ..} =>
                 ykpack::Terminator::Drop{
@@ -555,12 +561,12 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for
         let mut ser_stmts = Vec::new();
 
         // FIXME comment
-        if bb.as_u32() == 0 {
-            ser_stmts.push(ykpack::Statement::DefArg(0)); // FIXME say why
-            for a in &ccx.mir_args {
-                ser_stmts.push(ykpack::Statement::DefArg(ccx.tir_var(*a)));
-            }
-        }
+        // if bb.as_u32() == 0 {
+        //     ser_stmts.push(ykpack::Statement::DefArg(1)); // FIXME say why
+        //     for a in &ccx.mir_args {
+        //         ser_stmts.push(ykpack::Statement::DefArg(ccx.tir_var(*a)));
+        //     }
+        // }
 
         ser_stmts.extend(bb_data.statements.iter().map(|stmt| (*ccx, *bb, stmt).to_pack()));
         ykpack::BasicBlock::new(ser_stmts, (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
