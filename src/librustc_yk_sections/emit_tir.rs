@@ -10,10 +10,12 @@
 //! This module converts MIR into Yorick TIR (Tracing IR). TIR is more suitable for the run-time
 //! tracer: TIR (unlike MIR) is in SSA form (but it does preserve MIR's block structure).
 //!
-//! Serialisation itself is performed by an external library: ykpack.
-
-#![allow(unused_variables,dead_code,unused_imports)]
-//#![feature(vec_resize_default)]
+//! The conversion happens in stages:
+//!
+//! 1) The MIR is lowered into pre-SSA TIR without PHI nodes.
+//! 2) PHI nodes are insterted.
+//! 3) The pre-SSA TIR is converted into SSA form.
+//! 4) The finalised SSA TIR is serialised using ykpack.
 
 use rustc::ty::TyCtxt;
 
@@ -71,9 +73,8 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     var_map: RefCell<IndexVec<Local, Option<TirLocal>>>,
     /// The number of blocks in the MIR (and therefore in the TIR).
     num_blks: usize,
-    /// FIXME
+    /// 
     mir_args: Vec<Local>,
-    //num_args: usize,
 }
 
 impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
@@ -98,7 +99,7 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
             tcx,
             def_sites: RefCell::new(Vec::new()),
             block_defines: RefCell::new(IndexVec::from_elem_n(FxHashSet::default(), num_blks)),
-            next_tir_var: Cell::new(2), // Zero is always the return value in pre-SSA TIR. FIXME say why.
+            next_tir_var: Cell::new(2), // One is always the return value in pre-SSA TIR. FIXME and zero?
             var_map: RefCell::new(IndexVec::from_elem_n(Some(PRE_SSA_RET_VAR), 1)), // Pre-filled with return value.
             num_blks: num_blks,
             mir_args: mir.args_iter().collect(), // FIXME could be optimised.
@@ -133,7 +134,7 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
     }
 
     /// Finalise the conversion context, returning the definition sites, the block defines mapping,
-    /// and the number of TIR variables.
+    /// and the next fresh TIR variable.
     fn done(self) -> (Vec<BitSet<BasicBlock>>, IndexVec<BasicBlock, FxHashSet<TirLocal>>, u32) {
         (self.def_sites.into_inner(), self.block_defines.into_inner(), self.next_tir_var.into_inner())
     }
@@ -225,13 +226,13 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
             let mut pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
             {
                 let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
-                let (def_sites, block_defines, num_tir_vars) = ccx.done();
+                let (def_sites, block_defines, next_tir_var) = ccx.done();
 
                 info!("insert PHIs");
                 insert_phis(blocks, &doms, mir, def_sites, block_defines);
 
                 info!("rename vars");
-                RenameCx::new(num_tir_vars).rename_all(&doms, &mir, blocks);
+                RenameCx::new(next_tir_var).rename_all(&doms, &mir, blocks);
             }
 
             info!("write");
@@ -309,19 +310,19 @@ struct RenameCx {
 //const DUMMY_REACH_LOC: ReachLoc = ReachLoc {bb: 0, si: 0};
 
 impl RenameCx {
-    fn new(num_tir_vars: u32) -> Self {
+    fn new(next_fresh_var: u32) -> Self {
+        let vec_size =  usize::try_from(next_fresh_var.checked_mul(2).unwrap()).unwrap();
         Self {
-            next_fresh_var: 1,
+            next_fresh_var,
             // We will use at least as many variables as there are in the incoming TIR.
-            // FIXME plus one
-            reaching_defs: vec![BOTTOM; num_tir_vars as usize],
-            def_sites: vec![None; num_tir_vars as usize],
+            reaching_defs: vec![BOTTOM; vec_size],
+            def_sites: vec![None; vec_size], // FIXME, try to get rid of later.
         }
     }
 
     fn fresh_var(&mut self) -> TirLocal {
         let ret = self.next_fresh_var;
-        self.next_fresh_var.checked_add(1);
+        self.next_fresh_var = self.next_fresh_var.checked_add(1).unwrap();
         if self.reaching_defs.len() < usize::try_from(self.next_fresh_var).unwrap() {
             self.reaching_defs.resize_with(usize::try_from(self.next_fresh_var).unwrap(), || BOTTOM);
         }
@@ -354,11 +355,12 @@ impl RenameCx {
         blks: &mut Vec<ykpack::BasicBlock>, bb: TirBasicBlockIndex)
     {
         info!("rename for {:?}", bb);
-
         let bb_usize = usize::try_from(bb).unwrap();
         {
             info!("block {}: {}", bb, blks[bb_usize]);
         }
+
+        let num_stmts = blks[bb_usize].stmts.len();
 
         {
             for (i_idx, i) in &mut blks[bb_usize].stmts.iter_mut().enumerate() {
@@ -391,6 +393,15 @@ impl RenameCx {
                     self.reaching_defs[v_usize] = vp;
                 }
             }
+
+            // FIXME say why.
+            let term = &mut blks[bb_usize].term;
+            let term_loc = ReachLoc{bb: bb, si: num_stmts}; // FIXME special
+            for v in term.uses_vars_mut().iter_mut() {
+                info!("term uses var {:?}", v);
+                self.update_reaching_def(doms, **v, &term_loc);
+                **v = self.reaching_defs[usize::try_from(**v).unwrap()];
+            }
         }
 
         info!("PHASE: successors for {:?}: {:?}", bb, mir.successors(BasicBlock::from_u32(bb)));
@@ -421,12 +432,13 @@ impl RenameCx {
 
         let final_r = {
             let mut r = &self.reaching_defs[v_usize];
+            let r_usize = usize::try_from(*r).unwrap();
             info!("loop pre: {:?}", r);
-            while !(*r == BOTTOM || Self::def_dominates(doms, &self.def_sites[v_usize].as_ref().expect("None def site"), i)) {
+            while !(*r == BOTTOM || Self::def_dominates(doms, &self.def_sites[r_usize], i)) {
                 info!("top of loop: {:?}", r);
                 info!("reaching_defs: {:?}", self.reaching_defs);
                 let old_r = r;
-                r = &self.reaching_defs[usize::try_from(*r).unwrap()];
+                r = &self.reaching_defs[r_usize];
                 info!("unwrapped3");
                 assert!(r != old_r, "detected cycle in update_reaching_def");
             };
@@ -439,17 +451,24 @@ impl RenameCx {
     }
 
     // Does a definition at `r` dominate the instruction `i`?
-    fn def_dominates(doms: &Dominators<BasicBlock>, r: &ReachLoc, i: &ReachLoc) -> bool {
-        info!("def_dominates: {:?}, {:?}", r, i);
+    fn def_dominates(doms: &Dominators<BasicBlock>, opt_r: &Option<ReachLoc>, i: &ReachLoc) -> bool {
+        info!("def_dominates: {:?}, {:?}", opt_r, i);
         info!("{:?}", doms.all_immediate_dominators());
-        if r.bb == i.bb {
-            // If the locations are in the same block, `r` dominates if it comes before `i`.
-            info!("{:?}", r.si <= i.si);
-            r.si <= i.si
+
+        if let Some(r) = opt_r {
+            if r.bb == i.bb {
+                // If the locations are in the same block, `r` dominates if it comes before `i`.
+                info!("{:?}", r.si <= i.si);
+                r.si <= i.si
+            } else {
+                // The locations are in different blocks, so ask the CFG which block dominates.
+                info!("{:?}", doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb)));
+                doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb))
+            }
         } else {
-            // The locations are in different blocks, so ask the CFG which block dominates.
-            info!("{:?}", doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb)));
-            doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb))
+            // If the variable isn't defined yet, it's definition can't dominate anything.
+            info!("undefined var");
+            false
         }
     }
 }
@@ -568,13 +587,12 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for
         let (ccx, bb, bb_data) = self;
         let mut ser_stmts = Vec::new();
 
-        // FIXME comment
-        // if bb.as_u32() == 0 {
-        //     ser_stmts.push(ykpack::Statement::DefArg(1)); // FIXME say why
-        //     for a in &ccx.mir_args {
-        //         ser_stmts.push(ykpack::Statement::DefArg(ccx.tir_var(*a)));
-        //     }
-        // }
+        // If we are lowering the first block, we insertion a special `DefArgs` instruction, which
+        // provides the SSA conversion with a definition site for the TIR arguments.
+        if bb.as_u32() == 0 {
+             let args = ccx.mir_args.iter().map(|a| ccx.tir_var(*a)).collect();
+             ser_stmts.push(ykpack::Statement::DefArgs(args));
+        }
 
         ser_stmts.extend(bb_data.statements.iter().map(|stmt| (*ccx, *bb, stmt).to_pack()));
         ykpack::BasicBlock::new(ser_stmts, (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
