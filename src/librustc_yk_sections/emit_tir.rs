@@ -302,10 +302,11 @@ struct ReachLoc {
 /// means we have one counter instead of many.
 struct RenameCx {
     next_fresh_var: TirLocal,
-    reaching_defs: Vec<(TirLocal, ReachLoc)>,
+    reaching_defs: Vec<TirLocal>,
+    def_sites: Vec<Option<ReachLoc>>,
 }
 
-const DUMMY_REACH_LOC: ReachLoc = ReachLoc {bb: 0, si: 0};
+//const DUMMY_REACH_LOC: ReachLoc = ReachLoc {bb: 0, si: 0};
 
 impl RenameCx {
     fn new(num_tir_vars: u32) -> Self {
@@ -313,7 +314,8 @@ impl RenameCx {
             next_fresh_var: 1,
             // We will use at least as many variables as there are in the incoming TIR.
             // FIXME plus one
-            reaching_defs: vec![(BOTTOM, DUMMY_REACH_LOC); num_tir_vars as usize],
+            reaching_defs: vec![BOTTOM; num_tir_vars as usize],
+            def_sites: vec![None; num_tir_vars as usize],
         }
     }
 
@@ -321,9 +323,18 @@ impl RenameCx {
         let ret = self.next_fresh_var;
         self.next_fresh_var.checked_add(1);
         if self.reaching_defs.len() < usize::try_from(self.next_fresh_var).unwrap() {
-            self.reaching_defs.resize_with(usize::try_from(self.next_fresh_var).unwrap(), || (BOTTOM, DUMMY_REACH_LOC));
+            self.reaching_defs.resize_with(usize::try_from(self.next_fresh_var).unwrap(), || BOTTOM);
         }
         ret
+    }
+
+    fn add_def_site(&mut self, var: TirLocal, loc: ReachLoc) {
+        let required_sz = usize::try_from(var.checked_add(1).unwrap()).unwrap();
+        if self.def_sites.len() < required_sz {
+            self.def_sites.resize_with(required_sz, || None)
+        }
+        let var_usize = usize::try_from(var).unwrap();
+        self.def_sites[var_usize] = Some(loc);
     }
 
     fn rename_all(mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
@@ -359,7 +370,7 @@ impl RenameCx {
                     for v in i.uses_vars_mut().iter_mut() {
                         info!("uses var {:?}", v);
                         self.update_reaching_def(doms, **v, &i_loc);
-                        **v = self.reaching_defs[usize::try_from(**v).unwrap()].0;
+                        **v = self.reaching_defs[usize::try_from(**v).unwrap()];
                     }
                 }
 
@@ -369,14 +380,15 @@ impl RenameCx {
                     self.update_reaching_def(doms, **v, &i_loc);
 
                     let vp = self.fresh_var();
+                    self.add_def_site(vp, i_loc.clone());
                     info!("fresh_var={:?}", vp);
 
                     let vp_usize = usize::try_from(vp).unwrap();
                     let v_usize = usize::try_from(**v).unwrap();
 
                     **v = vp;
-                    self.reaching_defs[vp_usize] = self.reaching_defs[v_usize].clone();
-                    self.reaching_defs[v_usize] = (vp, i_loc.clone());
+                    self.reaching_defs[vp_usize] = self.reaching_defs[v_usize];
+                    self.reaching_defs[v_usize] = vp;
                 }
             }
         }
@@ -390,7 +402,7 @@ impl RenameCx {
                 let phi_loc = ReachLoc{bb: succ.as_u32(), si: phi_idx};
                 for v in phi.uses_vars_mut() {
                     self.update_reaching_def(doms, *v, &phi_loc);
-                    *v = self.reaching_defs[usize::try_from(*v).unwrap()].0;
+                    *v = self.reaching_defs[usize::try_from(*v).unwrap()];
                 }
             }
         }
@@ -406,27 +418,23 @@ impl RenameCx {
         info!("update reaching: {}, {:?}", v, i);
         let v_usize = usize::try_from(v).unwrap();
         info!("unwrapped1");
-        let r_final = {
+
+        let final_r = {
             let mut r = &self.reaching_defs[v_usize];
-            // In the SSA book, this is `while not(r == ⊥ or definition(r) dominates i`.
-            // We've applied De-Morgan's Theorem do avoid unwrapping `None` (in the case of ⊥) in
-            // the second half of the condition.
             info!("loop pre: {:?}", r);
-            //while !(r.0 == BOTTOM || Self::def_dominates(doms, &r.1, i)) {
-            while !(r.0 == BOTTOM || Self::def_dominates(doms, &r.1, i)) {
+            while !(*r == BOTTOM || Self::def_dominates(doms, &self.def_sites[v_usize].as_ref().expect("None def site"), i)) {
                 info!("top of loop: {:?}", r);
                 info!("reaching_defs: {:?}", self.reaching_defs);
-                let old_r0 = r.0;
-                r = &self.reaching_defs[usize::try_from(r.0).unwrap()];
+                let old_r = r;
+                r = &self.reaching_defs[usize::try_from(*r).unwrap()];
                 info!("unwrapped3");
-                assert!(r.0 != old_r0, "detected cycle in update_reaching_def");
-                //r = &self.reaching_defs[usize::try_from(r.as_ref().unwrap().0).unwrap()];
-            }
-            info!("loop_done: {:?}", r);
-            r.clone()
+                assert!(r != old_r, "detected cycle in update_reaching_def");
+            };
+            *r
         };
-        info!("done updating defs. new one is: {:?}", r_final);
-        self.reaching_defs[v_usize] = r_final;
+
+        info!("done updating defs. new one is: {:?}", final_r);
+        self.reaching_defs[v_usize] = final_r;
         info!("donex");
     }
 
