@@ -223,9 +223,9 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
             let doms = mir.dominators();
             let ccx = ConvCx::new(tcx, mir);
 
-            debug!("Starting MIR:\n{:?}\n", mir);
+            info!("Starting MIR:\n{:?}\n", mir);
             let mut pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
-            debug!("Initial TIR:\n{}\n", pack);
+            info!("Initial TIR:\n{}\n", pack);
             {
                 let (def_sites, block_defines, next_tir_var) = ccx.done();
 
@@ -233,13 +233,13 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
                     let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
                     insert_phis(blocks, &doms, mir, def_sites, block_defines);
                 }
-                debug!("TIR with PHI nodes:\n{}\n", pack);
+                info!("TIR with PHI nodes:\n{}\n", pack);
 
                 {
                     let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
                     RenameCx::new(next_tir_var).rename_all(&doms, &mir, blocks);
                 }
-                debug!("Final SSA TIR:\n{}\n", pack.clone());
+                info!("Final SSA TIR:\n{}\n", pack.clone());
             }
 
             if let Some(ref mut e) = enc {
@@ -400,7 +400,7 @@ impl RenameCx {
             }
 
             // In the algorithm in the book, control flow constructs are assumed to be regular
-            // statements, but in TIR control-flow is performed by block terminators. The
+            // statements, but in TIR control flow is performed by block terminators. The
             // terminators still contain variables which need to be renamed. You can think of this
             // as one extra iteration of the above loop, where we pretend the block terminator is a
             // statement on the end of the block. We know that terminators never define any new
@@ -414,14 +414,18 @@ impl RenameCx {
         }
 
         // Update variables used in PHI instructions in immediate successors.
+        info!("Update PHIs");
         for succ in mir.successors(BasicBlock::from_u32(bb)) {
             let succ_usize = succ.as_usize();
             for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
                 .filter(|(_, i)| i.is_phi())
             {
+                info!("phi: {:?}", phi);
                 let phi_loc = StmtLoc{bb: succ.as_u32(), si: phi_idx};
                 for v in phi.uses_vars_mut() {
+                    info!("uses {:?}", v);
                     self.update_reaching_def(doms, *v, &phi_loc);
+                    info!("rewrites to {:?}", self.reaching_defs[usize::try_from(*v).unwrap()]);
                     *v = self.reaching_defs[usize::try_from(*v).unwrap()];
                 }
             }
