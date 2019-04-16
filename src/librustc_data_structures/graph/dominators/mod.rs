@@ -120,8 +120,10 @@ impl<Node: Idx> Dominators<Node> {
 
     /// Find the children of a node in the dominator tree.
     pub fn immediately_dominates(&self, node: Node) -> Vec<Node> {
-        self.immediate_dominators.iter().enumerate().skip(1)
-            .filter(|(_, d)| d.is_some() && d.unwrap() == node)
+        self.immediate_dominators.iter().enumerate()
+            // Index 0 is the root of the dominator tree. It contains a dummy value (itself), which
+            // we must skip or we will end up with infinite loops.
+            .skip(1).filter(|(_, d)| d.is_some() && d.unwrap() == node)
             .map(|(i, _)| Node::new(i)).collect()
     }
 

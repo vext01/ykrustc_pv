@@ -47,6 +47,19 @@ use rustc_data_structures::fx::FxHashSet;
 const SECTION_NAME: &'static str = ".yk_tir";
 const TMP_EXT: &'static str = ".yk_tir.tmp";
 
+/// ⊥, i.e. undefined. We need a notion of undefined for SSA variable renaming step. Although it
+/// would have been cleaner to have used `None` to represent this, it would also have meant we
+/// ended up serialising lot's of `Some` values to TIR. At the end of the conversion, there will be
+/// no `None`s, so serialising `Some`s would just waste space.
+static BOTTOM: TirLocal = 0;
+
+/// The pre-SSA return value variable. In the pre-SSA TIR, we need the return value to reside at an
+/// easily locatable variable index so that later we can easily convert from MIR's implicit return
+/// values, to TIR's explicit return values. In MIR, a return terminator implicitly returns
+/// variable 0. Implicit return values are not possible for TIR, as the actual value we need to
+/// return depends upon which SSA definition reaches the return terminator.
+static PRE_SSA_RET_VAR: TirLocal = 1;
+
 /// Describes how to output MIR.
 pub enum TirMode {
     /// Write MIR into an object file for linkage. The inner path should be the path to the main
@@ -56,10 +69,7 @@ pub enum TirMode {
     TextDump(PathBuf),
 }
 
-static BOTTOM: u32 = 0;
-static PRE_SSA_RET_VAR: u32 = 1;
-
-/// A conversion context holds the state needed to perform the conversion to (pre-SSA) TIR.
+/// A conversion context holds the state needed to perform the conversion to the intial TIR.
 struct ConvCx<'a, 'tcx, 'gcx> {
     /// The compiler's god struct. Needed for queries etc.
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
@@ -68,41 +78,30 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     /// Maps each block to the variable it defines. This is what Appel calls `A_{orig}`.
     block_defines: RefCell<IndexVec<BasicBlock, FxHashSet<TirLocal>>>,
     /// Monotonically increasing number used to give TIR variables a unique ID.
+    /// Note that a couple of variables have a special meaning. See `BOTTOM` and `PRE_SSA_RET_VAR`.
     next_tir_var: Cell<TirLocal>,
     /// A mapping from MIR variables to TIR variables.
     var_map: RefCell<IndexVec<Local, Option<TirLocal>>>,
     /// The number of blocks in the MIR (and therefore in the TIR).
     num_blks: usize,
-    /// 
+    /// The incoming MIR arguments.
     mir_args: Vec<Local>,
 }
 
 impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
     fn new(tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, mir: &Mir<'tcx>) -> Self {
         let num_blks = mir.basic_blocks().len();
-        //let mut next_tir_var = 0;
-
-        // Return value has to be in a place where we can find it later.
-        //var_map.push(0);
-
-        // FIXME document invariant.
-        // let args_iter = mir.args_iter();
-        // let num_args = args_iter.clone().count();
-        // let mut var_map = IndexVec::from([None; num_args]);
-        // for mir_arg in args_iter {
-        //     var_map[mir_arg] = next_tir_var;
-        //     next_tir_var += 1;
-        // }
-        //
-
         Self {
             tcx,
             def_sites: RefCell::new(Vec::new()),
             block_defines: RefCell::new(IndexVec::from_elem_n(FxHashSet::default(), num_blks)),
-            next_tir_var: Cell::new(2), // One is always the return value in pre-SSA TIR. FIXME and zero?
-            var_map: RefCell::new(IndexVec::from_elem_n(Some(PRE_SSA_RET_VAR), 1)), // Pre-filled with return value.
+            // Since we have reserved two variables (BOTTOM and PRE_SSA_RET_VAR), the next new TIR
+            // variable we will give out is index two.
+            next_tir_var: Cell::new(2),
+            // The initial mapping ties the implicit MIR return value (0) to PRE_SSA_RET_VAR.
+            var_map: RefCell::new(IndexVec::from_elem_n(Some(PRE_SSA_RET_VAR), 1)),
             num_blks: num_blks,
-            mir_args: mir.args_iter().collect(), // FIXME could be optimised.
+            mir_args: mir.args_iter().collect(),
         }
     }
 
@@ -133,10 +132,13 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
         })
     }
 
-    /// Finalise the conversion context, returning the definition sites, the block defines mapping,
-    /// and the next fresh TIR variable.
+    /// Finalise the conversion context, returning a tuple of:
+    ///  - The definition sites.
+    ///  - The block defines mapping.
+    ///  - The next available TIR variable index.
     fn done(self) -> (Vec<BitSet<BasicBlock>>, IndexVec<BasicBlock, FxHashSet<TirLocal>>, u32) {
-        (self.def_sites.into_inner(), self.block_defines.into_inner(), self.next_tir_var.into_inner())
+        (self.def_sites.into_inner(), self.block_defines.into_inner(),
+            self.next_tir_var.into_inner())
     }
 
     /// Add `bb` as a definition site of the TIR variable `var`.
@@ -289,37 +291,42 @@ fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, doms: &Dominators<BasicBloc
     }
 }
 
-type TirStatementIndex = usize;
-
+/// A statement location.
 #[derive(Clone, Debug)]
-struct ReachLoc {
+struct StmtLoc {
+    /// The block containing the statement.
     bb: TirBasicBlockIndex,
-    si: TirStatementIndex,
+    /// The statement index.
+    si: usize,
 }
 
-/// This is the variable renaming scheme outlined in Algorithm 19.7 on p409 of the Appel book. We
-/// do the renaming in-place. Appel computes a <original variable name, SSA version> pair for each
-/// new variable definition. For simplicity and efficiency we use a plain old integer. This just
-/// means we have one counter instead of many.
+/// This is the variable renaming algorithm from the "Static Single Assignment Book" by J. Singer
+/// and others. See Section 3.1.3 on p33.
 struct RenameCx {
+    /// A counter used to give new TIR variables a unique identifier.
     next_fresh_var: TirLocal,
+    /// Records chains of SSA variable definitions.
     reaching_defs: Vec<TirLocal>,
-    def_sites: Vec<Option<ReachLoc>>,
+    /// Records the statement at which each SSA variable is defined.
+    def_sites: Vec<Option<StmtLoc>>,
 }
-
-//const DUMMY_REACH_LOC: ReachLoc = ReachLoc {bb: 0, si: 0};
 
 impl RenameCx {
+    /// Make a new renaming context. To prevent variable naming clashes, the `next_fresh_var`
+    /// argument should be one more than the last variable the previous step of the conversion
+    /// created.
     fn new(next_fresh_var: u32) -> Self {
-        let vec_size =  usize::try_from(next_fresh_var.checked_mul(2).unwrap()).unwrap();
+        // We start with space for the variables we know about so far. The vectors will grow as new
+        // SSA variables are instantiated.
+        let vec_size = usize::try_from(next_fresh_var).unwrap();
         Self {
             next_fresh_var,
-            // We will use at least as many variables as there are in the incoming TIR.
             reaching_defs: vec![BOTTOM; vec_size],
-            def_sites: vec![None; vec_size], // FIXME, try to get rid of later.
+            def_sites: vec![None; vec_size],
         }
     }
 
+    /// Create a new SSA variable.
     fn fresh_var(&mut self) -> TirLocal {
         let ret = self.next_fresh_var;
         self.next_fresh_var = self.next_fresh_var.checked_add(1).unwrap();
@@ -329,7 +336,8 @@ impl RenameCx {
         ret
     }
 
-    fn add_def_site(&mut self, var: TirLocal, loc: ReachLoc) {
+    /// Record the location at which an instruction is defined.
+    fn record_def_site(&mut self, var: TirLocal, loc: StmtLoc) {
         let required_sz = usize::try_from(var.checked_add(1).unwrap()).unwrap();
         if self.def_sites.len() < required_sz {
             self.def_sites.resize_with(required_sz, || None)
@@ -338,6 +346,7 @@ impl RenameCx {
         self.def_sites[var_usize] = Some(loc);
     }
 
+    /// Entry point for variable renaming.
     fn rename_all(mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
         blks: &mut Vec<ykpack::BasicBlock>)
     {
@@ -351,6 +360,7 @@ impl RenameCx {
         self.rename(doms, mir, blks, 0); // We start with the entry block and it ripples down.
     }
 
+    /// Rename the variables in the block `bb`. This is recursive.
     fn rename(&mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
         blks: &mut Vec<ykpack::BasicBlock>, bb: TirBasicBlockIndex)
     {
@@ -365,7 +375,7 @@ impl RenameCx {
         {
             for (i_idx, i) in &mut blks[bb_usize].stmts.iter_mut().enumerate() {
                 info!("\nstatement {}: {}", i_idx, i);
-                let i_loc = ReachLoc{bb: bb, si: i_idx};
+                let i_loc = StmtLoc{bb: bb, si: i_idx};
 
                 info!("PHASE: non-phi uses");
                 if !i.is_phi() {
@@ -382,7 +392,7 @@ impl RenameCx {
                     self.update_reaching_def(doms, **v, &i_loc);
 
                     let vp = self.fresh_var();
-                    self.add_def_site(vp, i_loc.clone());
+                    self.record_def_site(vp, i_loc.clone());
                     info!("fresh_var={:?}", vp);
 
                     let vp_usize = usize::try_from(vp).unwrap();
@@ -394,9 +404,16 @@ impl RenameCx {
                 }
             }
 
-            // FIXME say why.
+            // Rename the variables in the terminator.
+            // In the algorithm in the book, control flow constructs are assumed to be regular
+            // statements, but in TIR each block gets an explicit terminator which performs the
+            // necessary control flow operation. You can think of this as one extra iteration of
+            // the above loop, except we know that terminators never define any new variables, so
+            // we skip the step where new SSA variables may be introduced.
             let term = &mut blks[bb_usize].term;
-            let term_loc = ReachLoc{bb: bb, si: num_stmts}; // FIXME special
+            // This is a fake statement location. Terminators are not statements really, but we
+            // can pretend they are a statement after the last real TIR statement.
+            let term_loc = StmtLoc{bb: bb, si: num_stmts};
             for v in term.uses_vars_mut().iter_mut() {
                 info!("term uses var {:?}", v);
                 self.update_reaching_def(doms, **v, &term_loc);
@@ -406,11 +423,11 @@ impl RenameCx {
 
         info!("PHASE: successors for {:?}: {:?}", bb, mir.successors(BasicBlock::from_u32(bb)));
         for succ in mir.successors(BasicBlock::from_u32(bb)) {
-            let succ_usize = succ.as_usize(); //usize::try_from(succ).unwrap();
+            let succ_usize = succ.as_usize();
             for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
                 .filter(|(_, i)| i.is_phi())
             {
-                let phi_loc = ReachLoc{bb: succ.as_u32(), si: phi_idx};
+                let phi_loc = StmtLoc{bb: succ.as_u32(), si: phi_idx};
                 for v in phi.uses_vars_mut() {
                     self.update_reaching_def(doms, *v, &phi_loc);
                     *v = self.reaching_defs[usize::try_from(*v).unwrap()];
@@ -425,7 +442,8 @@ impl RenameCx {
         }
     }
 
-    fn update_reaching_def(&mut self, doms: &Dominators<BasicBlock>, v: TirLocal, i: &ReachLoc) {
+    /// Update `self.reaching_defs` for the variable `v` at location `i`.
+    fn update_reaching_def(&mut self, doms: &Dominators<BasicBlock>, v: TirLocal, i: &StmtLoc) {
         info!("update reaching: {}, {:?}", v, i);
         let v_usize = usize::try_from(v).unwrap();
         info!("unwrapped1");
@@ -451,7 +469,7 @@ impl RenameCx {
     }
 
     // Does a definition at `r` dominate the instruction `i`?
-    fn def_dominates(doms: &Dominators<BasicBlock>, opt_r: &Option<ReachLoc>, i: &ReachLoc) -> bool {
+    fn def_dominates(doms: &Dominators<BasicBlock>, opt_r: &Option<StmtLoc>, i: &StmtLoc) -> bool {
         info!("def_dominates: {:?}, {:?}", opt_r, i);
         info!("{:?}", doms.all_immediate_dominators());
 
