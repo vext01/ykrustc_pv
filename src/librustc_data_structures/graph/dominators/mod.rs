@@ -140,7 +140,7 @@ impl<Node: Idx> Dominators<Node> {
         self.dominators(node).any(|n| n == dom)
     }
 
-    //#[cfg(test)]
+    #[cfg(test)]
     pub fn all_immediate_dominators(&self) -> &IndexVec<Node, Option<Node>> {
         &self.immediate_dominators
     }

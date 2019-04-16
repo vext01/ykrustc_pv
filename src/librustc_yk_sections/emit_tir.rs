@@ -12,9 +12,9 @@
 //!
 //! The conversion happens in stages:
 //!
-//! 1) The MIR is lowered into pre-SSA TIR without PHI nodes.
-//! 2) PHI nodes are insterted.
-//! 3) The pre-SSA TIR is converted into SSA form.
+//! 1) The MIR is lowered into an initial TIR.
+//! 2) PHI nodes are inserted.
+//! 3) Variables are renamed and we arrive at SSA TIR.
 //! 4) The finalised SSA TIR is serialised using ykpack.
 
 use rustc::ty::TyCtxt;
@@ -217,23 +217,29 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
 
     for def_id in sorted_def_ids {
         if tcx.is_mir_available(*def_id) {
-            info!("generating TIR for {:?}", def_id);
+            info!("Generating TIR for {:?}", def_id);
 
             let mir = tcx.optimized_mir(*def_id);
             let doms = mir.dominators();
             let ccx = ConvCx::new(tcx, mir);
 
-            debug!("generating initial TIR");
+            debug!("Starting MIR:\n{:?}\n", mir);
             let mut pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
+            debug!("Initial TIR:\n{}\n", pack);
             {
-                let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
                 let (def_sites, block_defines, next_tir_var) = ccx.done();
 
-                debug!("inserting PHI statements into initial TIR");
-                insert_phis(blocks, &doms, mir, def_sites, block_defines);
+                {
+                    let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
+                    insert_phis(blocks, &doms, mir, def_sites, block_defines);
+                }
+                debug!("TIR with PHI nodes:\n{}\n", pack);
 
-                debug!("renaming variables to arrive at SSA TIR");
-                RenameCx::new(next_tir_var).rename_all(&doms, &mir, blocks);
+                {
+                    let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
+                    RenameCx::new(next_tir_var).rename_all(&doms, &mir, blocks);
+                }
+                debug!("Final SSA TIR:\n{}\n", pack.clone());
             }
 
             if let Some(ref mut e) = enc {
@@ -287,6 +293,13 @@ fn insert_phis(blocks: &mut Vec<ykpack::BasicBlock>, doms: &Dominators<BasicBloc
             }
         }
     }
+}
+
+fn insert_phi(block: &mut ykpack::BasicBlock, var: TirLocal, arity: usize) {
+    let lhs = ykpack::Place::Local(var);
+    let rhs_vars = (0..arity).map(|_| lhs.clone()).collect();
+    let rhs = ykpack::Rvalue::Phi(rhs_vars);
+    block.stmts.insert(0, ykpack::Statement::Assign(lhs, rhs));
 }
 
 /// A statement location.
@@ -456,14 +469,6 @@ impl RenameCx {
     }
 }
 
-fn insert_phi(block: &mut ykpack::BasicBlock, var: TirLocal, arity: usize) {
-    let lhs = ykpack::Place::Local(var);
-    let rhs_vars = (0..arity).map(|_| lhs.clone()).collect();
-    let rhs = ykpack::Rvalue::Phi(rhs_vars);
-    block.stmts.insert(0, ykpack::Statement::Assign(lhs, rhs));
-}
-
-
 /// The trait for converting MIR data structures into a bytecode packs.
 trait ToPack<T> {
     fn to_pack(&mut self) -> T;
@@ -570,7 +575,7 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for
         let (ccx, bb, bb_data) = self;
         let mut ser_stmts = Vec::new();
 
-        // If we are lowering the first block, we insertion a special `DefArgs` instruction, which
+        // If we are lowering the first block, we insert a special `DefArgs` instruction, which
         // provides the SSA conversion with a definition site for the TIR arguments.
         if bb.as_u32() == 0 {
              let args = ccx.mir_args.iter().map(|a| ccx.tir_var(*a)).collect();
