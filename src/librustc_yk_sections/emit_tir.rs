@@ -216,7 +216,6 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
     sorted_def_ids.sort();
 
     for def_id in sorted_def_ids {
-        info!("Def Id: {:?}", def_id);
         if tcx.is_mir_available(*def_id) {
             info!("generating TIR for {:?}", def_id);
 
@@ -224,20 +223,19 @@ fn do_generate_tir<'a, 'tcx, 'gcx>(
             let doms = mir.dominators();
             let ccx = ConvCx::new(tcx, mir);
 
-            info!("generate pre-ssa TIR");
+            debug!("generating initial TIR");
             let mut pack = (&ccx, def_id, tcx.optimized_mir(*def_id)).to_pack();
             {
                 let ykpack::Pack::Mir(ykpack::Mir{ref mut blocks, ..}) = pack;
                 let (def_sites, block_defines, next_tir_var) = ccx.done();
 
-                info!("insert PHIs");
+                debug!("inserting PHI statements into initial TIR");
                 insert_phis(blocks, &doms, mir, def_sites, block_defines);
 
-                info!("rename vars");
+                debug!("renaming variables to arrive at SSA TIR");
                 RenameCx::new(next_tir_var).rename_all(&doms, &mir, blocks);
             }
 
-            info!("write");
             if let Some(ref mut e) = enc {
                 e.serialise(pack)?;
             } else {
@@ -350,13 +348,6 @@ impl RenameCx {
     fn rename_all(mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
         blks: &mut Vec<ykpack::BasicBlock>)
     {
-        info!("rename all");
-        info!("blks:");
-
-        for (i, b) in blks.iter().enumerate() {
-            info!("\nbb{}:\n{:?}", i, b);
-        }
-
         self.rename(doms, mir, blks, 0); // We start with the entry block and it ripples down.
     }
 
@@ -364,36 +355,27 @@ impl RenameCx {
     fn rename(&mut self, doms: &Dominators<BasicBlock>, mir: &Mir,
         blks: &mut Vec<ykpack::BasicBlock>, bb: TirBasicBlockIndex)
     {
-        info!("rename for {:?}", bb);
         let bb_usize = usize::try_from(bb).unwrap();
-        {
-            info!("block {}: {}", bb, blks[bb_usize]);
-        }
-
         let num_stmts = blks[bb_usize].stmts.len();
 
         {
             for (i_idx, i) in &mut blks[bb_usize].stmts.iter_mut().enumerate() {
-                info!("\nstatement {}: {}", i_idx, i);
                 let i_loc = StmtLoc{bb: bb, si: i_idx};
 
-                info!("PHASE: non-phi uses");
+                // Update variable uses in non-phi instructions.
                 if !i.is_phi() {
                     for v in i.uses_vars_mut().iter_mut() {
-                        info!("uses var {:?}", v);
                         self.update_reaching_def(doms, **v, &i_loc);
                         **v = self.reaching_defs[usize::try_from(**v).unwrap()];
                     }
                 }
 
-                info!("PHASE: defs");
+                // Update variable definitions in instructions (including PHIs this time).
                 for v in i.defs_vars_mut().iter_mut() {
-                    info!("defs var={:?}", v);
                     self.update_reaching_def(doms, **v, &i_loc);
 
                     let vp = self.fresh_var();
                     self.record_def_site(vp, i_loc.clone());
-                    info!("fresh_var={:?}", vp);
 
                     let vp_usize = usize::try_from(vp).unwrap();
                     let v_usize = usize::try_from(**v).unwrap();
@@ -404,24 +386,21 @@ impl RenameCx {
                 }
             }
 
-            // Rename the variables in the terminator.
             // In the algorithm in the book, control flow constructs are assumed to be regular
-            // statements, but in TIR each block gets an explicit terminator which performs the
-            // necessary control flow operation. You can think of this as one extra iteration of
-            // the above loop, except we know that terminators never define any new variables, so
-            // we skip the step where new SSA variables may be introduced.
+            // statements, but in TIR control-flow is performed by block terminators. The
+            // terminators still contain variables which need to be renamed. You can think of this
+            // as one extra iteration of the above loop, where we pretend the block terminator is a
+            // statement on the end of the block. We know that terminators never define any new
+            // variables, so we skip the step where new SSA variables may be introduced.
             let term = &mut blks[bb_usize].term;
-            // This is a fake statement location. Terminators are not statements really, but we
-            // can pretend they are a statement after the last real TIR statement.
             let term_loc = StmtLoc{bb: bb, si: num_stmts};
             for v in term.uses_vars_mut().iter_mut() {
-                info!("term uses var {:?}", v);
                 self.update_reaching_def(doms, **v, &term_loc);
                 **v = self.reaching_defs[usize::try_from(**v).unwrap()];
             }
         }
 
-        info!("PHASE: successors for {:?}: {:?}", bb, mir.successors(BasicBlock::from_u32(bb)));
+        // Update variables used in PHI instructions in immediate successors.
         for succ in mir.successors(BasicBlock::from_u32(bb)) {
             let succ_usize = succ.as_usize();
             for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
@@ -435,8 +414,7 @@ impl RenameCx {
             }
         }
 
-        info!("PHASE: recurse for {:?}: {:?}", bb, doms.immediately_dominates(BasicBlock::from_u32(bb)));
-        info!("DOM TREE: {:?}", doms.all_immediate_dominators());
+        // Continue walking the dominator tree in depth-first pre-order.
         for next_bb in doms.immediately_dominates(BasicBlock::from_u32(bb)) {
             self.rename(doms, mir, blks, next_bb.as_u32());
         }
@@ -444,48 +422,35 @@ impl RenameCx {
 
     /// Update `self.reaching_defs` for the variable `v` at location `i`.
     fn update_reaching_def(&mut self, doms: &Dominators<BasicBlock>, v: TirLocal, i: &StmtLoc) {
-        info!("update reaching: {}, {:?}", v, i);
         let v_usize = usize::try_from(v).unwrap();
-        info!("unwrapped1");
 
         let final_r = {
             let mut r = &self.reaching_defs[v_usize];
             let r_usize = usize::try_from(*r).unwrap();
-            info!("loop pre: {:?}", r);
             while !(*r == BOTTOM || Self::def_dominates(doms, &self.def_sites[r_usize], i)) {
-                info!("top of loop: {:?}", r);
-                info!("reaching_defs: {:?}", self.reaching_defs);
                 let old_r = r;
                 r = &self.reaching_defs[r_usize];
-                info!("unwrapped3");
                 assert!(r != old_r, "detected cycle in update_reaching_def");
             };
             *r
         };
-
-        info!("done updating defs. new one is: {:?}", final_r);
         self.reaching_defs[v_usize] = final_r;
-        info!("donex");
     }
 
     // Does a definition at `r` dominate the instruction `i`?
     fn def_dominates(doms: &Dominators<BasicBlock>, opt_r: &Option<StmtLoc>, i: &StmtLoc) -> bool {
-        info!("def_dominates: {:?}, {:?}", opt_r, i);
-        info!("{:?}", doms.all_immediate_dominators());
-
         if let Some(r) = opt_r {
             if r.bb == i.bb {
                 // If the locations are in the same block, `r` dominates if it comes before `i`.
-                info!("{:?}", r.si <= i.si);
                 r.si <= i.si
             } else {
                 // The locations are in different blocks, so ask the CFG which block dominates.
-                info!("{:?}", doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb)));
                 doms.is_dominated_by(BasicBlock::from_u32(i.bb), BasicBlock::from_u32(r.bb))
             }
         } else {
             // If the variable isn't defined yet, it's definition can't dominate anything.
-            info!("undefined var");
+            // FIXME can this even happen?
+            warn!("undefined var");
             false
         }
     }
