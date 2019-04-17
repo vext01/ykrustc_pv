@@ -369,6 +369,7 @@ impl RenameCx {
         blks: &mut Vec<ykpack::BasicBlock>, bb: TirBasicBlockIndex)
     {
         let bb_usize = usize::try_from(bb).unwrap();
+        info!("PROCESS BB{}\n-----------------", bb_usize);
         let num_stmts = blks[bb_usize].stmts.len();
 
         {
@@ -384,10 +385,15 @@ impl RenameCx {
                 }
 
                 // Update variable definitions in instructions (including PHIs this time).
+                info!("Define vars");
                 for v in i.defs_vars_mut().iter_mut() {
+                    info!("Define new for {}", v);
+                    info!("pre-update rds: {:?}", self.reaching_defs);
+                    info!("pre-update sites: {:?}", self.def_sites);
                     self.update_reaching_def(doms, **v, &i_loc);
 
                     let vp = self.fresh_var();
+                    info!("new var: {}", vp);
                     self.record_def_site(vp, i_loc.clone());
 
                     let vp_usize = usize::try_from(vp).unwrap();
@@ -396,6 +402,10 @@ impl RenameCx {
                     **v = vp;
                     self.reaching_defs[vp_usize] = self.reaching_defs[v_usize];
                     self.reaching_defs[v_usize] = vp;
+
+                    info!("{} was rewritten to {} in instr", **v, vp);
+                    info!("post-update rds: {:?}", self.reaching_defs);
+                    info!("post-update sites: {:?}", self.def_sites);
                 }
             }
 
@@ -417,21 +427,22 @@ impl RenameCx {
         info!("Update PHIs");
         for succ in mir.successors(BasicBlock::from_u32(bb)) {
             let succ_usize = succ.as_usize();
+
+            // `bb` is the jth predecessor of `succ`.
+            let j = mir.predecessors_for(succ).iter().position(|b| b.as_u32() == bb).unwrap();
             // FIXME underscore
-            for (_phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
+            for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
                 .filter(|(_, i)| i.is_phi())
             {
-                // `bb` is the jth predecessor of `succ`.
-                let j = mir.predecessors_for(succ).iter().position(|b| b.as_u32() == bb).unwrap();
                 info!("phi: {:?}", phi);
                 info!("j: {:?}", j);
-                //let phi_loc = StmtLoc{bb: succ.as_u32(), si: phi_idx};
+                let phi_loc = StmtLoc{bb: succ.as_u32(), si: phi_idx};
                 //for v in phi.uses_vars_mut() {
                 //    info!("uses {:?}", v);
                     let v = phi.phi_arg_mut(j);
-                    //self.update_reaching_def(doms, *v, &phi_loc);
+                    self.update_reaching_def(doms, *v, &phi_loc);
 
-                    info!("{:?} rewrites to {:?}", v, usize::try_from(*v).unwrap());
+                    info!("{:?} rewrites to {:?}", v, self.reaching_defs[usize::try_from(*v).unwrap()]);
                     *v = self.reaching_defs[usize::try_from(*v).unwrap()];
                 //}
             }
@@ -445,18 +456,23 @@ impl RenameCx {
 
     /// Update `self.reaching_defs` for the variable `v` at location `i`.
     fn update_reaching_def(&mut self, doms: &Dominators<BasicBlock>, v: TirLocal, i: &StmtLoc) {
+        info!("Enter update:\nrds={:?}\ndefsites={:?}", self.reaching_defs, self.def_sites);
         let v_usize = usize::try_from(v).unwrap();
 
         let final_r = {
             let mut r = &self.reaching_defs[v_usize];
-            let r_usize = usize::try_from(*r).unwrap();
+            info!("start r: {}", r);
+            let mut r_usize = usize::try_from(*r).unwrap();
             while !(*r == BOTTOM || Self::def_dominates(doms, &self.def_sites[r_usize], i)) {
                 let old_r = r;
                 r = &self.reaching_defs[r_usize];
+                info!("new r: {}", r);
                 assert!(r != old_r, "detected cycle in update_reaching_def");
+                r_usize = usize::try_from(*r).unwrap();
             };
             *r
         };
+        info!("Exit update:\nreaching def {} was updated to {}", v_usize, final_r);
         self.reaching_defs[v_usize] = final_r;
     }
 
