@@ -431,16 +431,16 @@ impl RenameCx {
             // `bb` is the jth predecessor of `succ`.
             let j = mir.predecessors_for(succ).iter().position(|b| b.as_u32() == bb).unwrap();
             // FIXME underscore
-            for (phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
+            for (_phi_idx, phi) in &mut blks[succ_usize].stmts.iter_mut().enumerate()
                 .filter(|(_, i)| i.is_phi())
             {
                 info!("phi: {:?}", phi);
                 info!("j: {:?}", j);
-                let phi_loc = StmtLoc{bb: succ.as_u32(), si: phi_idx};
+                //let phi_loc = StmtLoc{bb: succ.as_u32(), si: phi_idx};
                 //for v in phi.uses_vars_mut() {
                 //    info!("uses {:?}", v);
                     let v = phi.phi_arg_mut(j);
-                    self.update_reaching_def(doms, *v, &phi_loc);
+                    //self.update_reaching_def(doms, *v, &phi_loc);
 
                     info!("{:?} rewrites to {:?}", v, self.reaching_defs[usize::try_from(*v).unwrap()]);
                     *v = self.reaching_defs[usize::try_from(*v).unwrap()];
