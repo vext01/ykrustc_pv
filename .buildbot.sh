@@ -10,4 +10,4 @@ ulimit -d $((1024 * 1024 * 8)) # 8 GiB
 
 # Note that the gdb must be Python enabled.
 /usr/bin/time -v env PATH=/opt/gdb-8.2/bin:${PATH} \
-    RUST_BACKTRACE=1 ./x.py test --config .buildbot.toml
+    RUST_BACKTRACE=1 ./x.py test -j6 --config .buildbot.toml
