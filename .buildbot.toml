@@ -10,3 +10,7 @@ tools = ["cargo", "rustfmt"]
 
 [llvm]
 assertions = true           # Turn on assertions in LLVM.
+
+[install]
+prefix = "ykrustc-stage2"
+sysconfdir = "etc"

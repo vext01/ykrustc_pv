@@ -12,13 +12,12 @@ ulimit -d $((1024 * 1024 * 8)) # 8 GiB
     RUST_BACKTRACE=1 ./x.py test --config .buildbot.toml
 
 # Archive the build and put it in /opt
-TARBALL_TOPDIR=ykrustc-stage2
+TARBALL_TOPDIR=ykrustc-stage2 # To match [install] in the build config.
 TARBALL_NAME=ykrustc-stage2-latest.tar.bz2
 SNAP_DIR=/opt/ykrustc-bin-snapshots
 
-cd build/x86_64-unknown-linux-gnu
-ln -sf stage2 ${TARBALL_TOPDIR}
+./x.py install
 git show -s HEAD > ${TARBALL_TOPDIR}/VERSION
-tar hjcvf ${TARBALL_NAME} ${TARBALL_TOPDIR}
+tar jcvf ${TARBALL_NAME} ${TARBALL_TOPDIR}
 chmod 775 ${TARBALL_NAME}
 mv ${TARBALL_NAME} ${SNAP_DIR} # Overwrites any old archive.
