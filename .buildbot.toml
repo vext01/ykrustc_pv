@@ -6,4 +6,3 @@ debug-assertions = true     # Turn on assertions in rustc.
 
 [llvm]
 assertions = true           # Turn on assertions in LLVM.
-targets = "X86"             # Only build LLVM targets we use.
