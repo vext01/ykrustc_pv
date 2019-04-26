@@ -453,9 +453,12 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
             | TerminatorKind::FalseEdges{real_target: target_bb, ..}
             | TerminatorKind::FalseUnwind{real_target: target_bb, ..} =>
                 ykpack::Terminator::Goto{target_bb: u32::from(target_bb)},
-            TerminatorKind::SwitchInt{targets: ref target_bbs, ..} => {
+            TerminatorKind::SwitchInt{targets: ref target_bbs, discr} => {
                 let target_bbs = target_bbs.iter().map(|bb| u32::from(*bb)).collect();
-                ykpack::Terminator::SwitchInt{target_bbs}
+                ykpack::Terminator::SwitchInt{
+                    discr: (*ccx, discr).to_pack(),
+                    target_bbs,
+                }
             },
             TerminatorKind::Resume => ykpack::Terminator::Resume,
             TerminatorKind::Abort => ykpack::Terminator::Abort,
@@ -472,23 +475,9 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
                     unwind_bb: unwind_bb.map(|bb| u32::from(bb)),
                 },
             TerminatorKind::Call{ref func, cleanup: cleanup_bb, ref destination, .. } => {
-                let ser_oper = if let Operand::Constant(box Constant {
-                    literal: LazyConst::Evaluated(Const {
-                        ty: &TyS {
-                            sty: TyKind::FnDef(target_def_id, _substs), ..
-                        }, ..
-                    }), ..
-                }, ..) = func {
-                    // A statically known call target.
-                    ykpack::CallOperand::Fn((*ccx, &target_def_id).to_pack())
-                } else {
-                    // FIXME -- implement other callables.
-                    ykpack::CallOperand::Unknown
-                };
-
                 let ret_bb = destination.as_ref().map(|(_, bb)| u32::from(*bb));
                 ykpack::Terminator::Call{
-                    operand: ser_oper,
+                    func: (*ccx, func).to_pack(),
                     cleanup_bb: cleanup_bb.map(|bb| u32::from(bb)),
                     ret_bb: ret_bb,
                 }
@@ -554,6 +543,19 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
         match place {
             Place::Base(PlaceBase::Local(local)) => ykpack::Place::Local(ccx.tir_var(*local)),
             _ => ykpack::Place::Unimplemented, // FIXME
+        }
+    }
+}
+
+/// Operand -> Pack
+impl<'tcx> ToPack<ykpack::Operand> for (&ConvCx<'_, 'tcx, '_>, &Operand<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::Operand {
+        let (ccx, oper) = self;
+
+        match oper {
+            Operand::Copy(place) => ykpack::Operand::Copy((*ccx, place).to_pack()),
+            Operand::Move(place) => ykpack::Operand::Copy((*ccx, place).to_pack()),
+            Operand::Constant(c) => ykpack::Operand::Copy((*ccx, c).to_pack()),
         }
     }
 }
