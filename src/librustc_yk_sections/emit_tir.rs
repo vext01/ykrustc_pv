@@ -1,4 +1,3 @@
-// Copyright 2018 King's College London.
 // Created by the Software Development Team <http://soft-dev.org/>.
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
@@ -19,7 +18,7 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp, UnOp, NullOp
+    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp, UnOp, NullOpD //, Projection,
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -325,7 +324,7 @@ impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &St
             StatementKind::Assign(ref place, ref rval) => {
                 let lhs = (*ccx, place).to_pack();
                 let rhs = (*ccx, &**rval).to_pack();
-                if let ykpack::Place::Local(tvar) = lhs {
+                if let ykpack::Place::Base(ykpack::PlaceBase::Local(tvar)) = lhs {
                     ccx.push_def_site(*bb, tvar);
                 }
                 ykpack::Statement::Assign(lhs, rhs)
@@ -361,11 +360,62 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
         let (ccx, place) = self;
 
         match place {
-            Place::Base(PlaceBase::Local(local)) => ykpack::Place::Local(ccx.tir_var(*local)),
-            _ => ykpack::Place::Unimplemented, // FIXME
+            Place::Base(pb) => ykpack::Place::Base((*ccx, pb).to_pack()),
+            Place::Projection(pj) => ykpack::Place::Projection((*ccx, pj).to_pack()),
         }
     }
 }
+
+/// Projection -> Pack
+//impl<'tcx, B, V, T> ToPack<ykpack::Projection> for (&ConvCx<'_, 'tcx, '_>, &Projection<'tcx, B, V, T>) {
+//    fn to_pack(&mut self) -> ykpack::Projection {
+//        let (ccx, pj) = self;
+//
+//        ykpack::Projection {
+//            base: (*ccx, pj.base).to_pack(),
+//            elem: ykpack::ProjectionElem::Unimplemented, // FIXME
+//        }
+//    }
+//}
+
+//impl<'tcx, B, V, T> ToPack<ykpack::Projection> for (&ConvCx<'_, 'tcx, '_>, &Box<Projection<'tcx, B, V, T>>) {
+//    fn to_pack(&mut self) -> ykpack::Projection {
+//        let (ccx, pj) = self;
+//        (*ccx, pj.as_ref()).to_pack()
+//    }
+//}
+
+impl<'tcx, B> ToPack<ykpack::Projection> for (&ConvCx<'_, 'tcx, '_>, B) {
+    fn to_pack(&mut self) -> ykpack::Projection {
+        let (ccx, b) = self;
+        (*ccx, b).to_pack()
+    }
+}
+
+/// PlaceBase -> Pack
+impl<'tcx> ToPack<ykpack::PlaceBase> for (&ConvCx<'_, 'tcx, '_>, &PlaceBase<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::PlaceBase {
+        let (ccx, pb) = self;
+
+        match pb {
+            PlaceBase::Local(local) => ykpack::PlaceBase::Local(ccx.tir_var(*local)),
+            PlaceBase::Static(s) => ykpack::PlaceBase::Static((*ccx, &s.as_ref().def_id).to_pack()),
+            PlaceBase::Promoted(bx) => ykpack::PlaceBase::Promoted(bx.0.as_u32()),
+        }
+    }
+}
+
+//impl<'tcx> ToPack<ykpack::PlaceBase> for (&ConvCx<'_, 'tcx, '_>, &Box<PlaceBase<'tcx>>) {
+//    fn to_pack(&mut self) -> ykpack::PlaceBase {
+//        let (ccx, pb) = self;
+//
+//        match pb {
+//            PlaceBase::Local(local) => ykpack::PlaceBase::Local(ccx.tir_var(*local)),
+//            PlaceBase::Static(def_id, _) => (*ccx, def_id).to_pack(),
+//            PlaceBase::Promoted(pi) => ykpack::PlaceBase::Promoted(pi.as_u32()),
+//        }
+//    }
+//}
 
 /// Operand -> Pack
 impl<'tcx> ToPack<ykpack::Operand> for (&ConvCx<'_, 'tcx, '_>, &Operand<'tcx>) {
