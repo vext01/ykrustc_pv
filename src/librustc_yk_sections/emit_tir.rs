@@ -1,4 +1,3 @@
-// Copyright 2018 King's College London.
 // Created by the Software Development Team <http://soft-dev.org/>.
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
@@ -10,6 +9,8 @@
 //! This module converts MIR into Yorick TIR (Tracing IR).
 //! Note that we preserve the MIR block structure when lowering to TIR.
 //!
+//! Note also that TIR is currently untyped.
+//!
 //! Serialisation itself is performed by an external library: ykpack.
 
 use rustc::ty::TyCtxt;
@@ -17,7 +18,8 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Local, PlaceBase
+    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp, UnOp, NullOp, Projection,
+    AggregateKind
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -29,6 +31,7 @@ use std::io::Write;
 use std::error::Error;
 use std::cell::{Cell, RefCell};
 use std::mem::size_of;
+use std::marker::PhantomData;
 use rustc_data_structures::bit_set::BitSet;
 use rustc_data_structures::indexed_vec::IndexVec;
 use ykpack;
@@ -264,6 +267,8 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
                     unwind_bb: unwind_bb.map(|bb| u32::from(bb)),
                 },
             TerminatorKind::Call{ref func, cleanup: cleanup_bb, ref destination, .. } => {
+                // In MIR, a call instruction accepts an arbitrary operand, but in TIR we special
+                // case the call targets.
                 let ser_oper = if let Operand::Constant(box Constant {
                     literal: LazyConst::Evaluated(Const {
                         ty: &TyS {
@@ -307,7 +312,7 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for
     fn to_pack(&mut self) -> ykpack::BasicBlock {
         let (ccx, bb, bb_data) = self;
         let ser_stmts = bb_data.statements.iter().map(|stmt| (*ccx, *bb, stmt).to_pack());
-        ykpack::BasicBlock::new(ser_stmts.collect(),
+        ykpack::BasicBlock::new(ser_stmts.filter(|s| *s != ykpack::Statement::Nop).collect(),
             (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
     }
 }
@@ -321,12 +326,32 @@ impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &St
             StatementKind::Assign(ref place, ref rval) => {
                 let lhs = (*ccx, place).to_pack();
                 let rhs = (*ccx, &**rval).to_pack();
-                if let ykpack::Place::Local(tvar) = lhs {
+                if let ykpack::Place::Base(ykpack::PlaceBase::Local(tvar)) = lhs {
                     ccx.push_def_site(*bb, tvar);
                 }
                 ykpack::Statement::Assign(lhs, rhs)
             },
-            _ => ykpack::Statement::Unimplemented,
+            StatementKind::SetDiscriminant{ref place, ref variant_index} => {
+                ykpack::Statement::SetDiscriminant{
+                    place: (*ccx, place).to_pack(),
+                    variant_index: variant_index.as_u32(),
+                }
+            },
+            // StorageLive/Dead and fake reads are not useful the tracer. Ignore them.
+            StatementKind::StorageLive(..)
+            | StatementKind::StorageDead(..)
+            | StatementKind::FakeRead(..) => ykpack::Statement::Nop,
+            StatementKind::InlineAsm{..} =>
+                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::InlineAsm),
+            // Retagging (for stacked borrows).
+            // https://www.ralfj.de/blog/2018/08/07/stacked-borrows.html
+            StatementKind::Retag(..) =>
+                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::Retag),
+            // Type ascription.
+            // https://github.com/rust-lang/rfcs/pull/803
+            StatementKind::AscribeUserType(..) =>
+                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::AscribeUserType),
+            StatementKind::Nop => ykpack::Statement::Nop,
         }
     }
 }
@@ -337,8 +362,48 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
         let (ccx, place) = self;
 
         match place {
-            Place::Base(PlaceBase::Local(local)) => ykpack::Place::Local(ccx.tir_var(*local)),
-            _ => ykpack::Place::Unimplemented, // FIXME
+            Place::Base(pb) => ykpack::Place::Base((*ccx, pb).to_pack()),
+            Place::Projection(pj) => ykpack::Place::Projection((*ccx, pj.as_ref()).to_pack()),
+        }
+    }
+}
+
+/// Projection -> Pack
+impl<'tcx, T> ToPack<ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex>>
+    for (&ConvCx<'_, 'tcx, '_>, &Projection<'tcx, Place<'tcx>, Local, T>)
+{
+    fn to_pack(&mut self) -> ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex> {
+        let (ccx, pj) = self;
+
+        ykpack::Projection {
+            base: Box::new((*ccx, &pj.base).to_pack()),
+            elem: ykpack::ProjectionElem::Unimplemented(PhantomData), // FIXME
+        }
+    }
+}
+
+/// PlaceBase -> Pack
+impl<'tcx> ToPack<ykpack::PlaceBase> for (&ConvCx<'_, 'tcx, '_>, &PlaceBase<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::PlaceBase {
+        let (ccx, pb) = self;
+
+        match pb {
+            PlaceBase::Local(local) => ykpack::PlaceBase::Local(ccx.tir_var(*local)),
+            PlaceBase::Static(s) => ykpack::PlaceBase::Static((*ccx, &s.as_ref().def_id).to_pack()),
+            PlaceBase::Promoted(bx) => ykpack::PlaceBase::Promoted(bx.0.as_u32()),
+        }
+    }
+}
+
+/// Operand -> Pack
+impl<'tcx> ToPack<ykpack::Operand> for (&ConvCx<'_, 'tcx, '_>, &Operand<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::Operand {
+        let (ccx, op) = self;
+
+        match *op {
+            Operand::Move(place) | Operand::Copy(place)
+                => ykpack::Operand::Place((*ccx, place).to_pack()),
+            _ => ykpack::Operand::Unimplemented, // FIXME
         }
     }
 }
@@ -349,8 +414,106 @@ impl<'tcx> ToPack<ykpack::Rvalue> for (&ConvCx<'_, 'tcx, '_>, &Rvalue<'tcx>) {
         let (ccx, rval) = self;
 
         match *rval {
-            Rvalue::Use(Operand::Move(place)) => ykpack::Rvalue::Place((*ccx, place).to_pack()),
-            _ => ykpack::Rvalue::Unimplemented, // FIXME
+            Rvalue::Use(oper) => ykpack::Rvalue::Use((*ccx, oper).to_pack()),
+            Rvalue::Repeat(oper, len) => ykpack::Rvalue::Repeat((*ccx, oper).to_pack(), *len),
+            Rvalue::Ref(_region, borrow_kind, place) => ykpack::Rvalue::Ref(
+                (*ccx, borrow_kind).to_pack(),
+                (*ccx, place).to_pack()),
+            Rvalue::Len(place) => ykpack::Rvalue::Len((*ccx, place).to_pack()),
+            // Since TIR is currently untyped we consider a cast as a simple variable use.
+            Rvalue::Cast(_, oper, _) => ykpack::Rvalue::Use((*ccx, oper).to_pack()),
+            Rvalue::BinaryOp(bop, o1, o2) => ykpack::Rvalue::BinaryOp(
+                (*ccx, bop).to_pack(),
+                (*ccx, o1).to_pack(),
+                (*ccx, o2).to_pack()),
+            Rvalue::CheckedBinaryOp(bop, o1, o2) => ykpack::Rvalue::CheckedBinaryOp(
+                (*ccx, bop).to_pack(),
+                (*ccx, o1).to_pack(),
+                (*ccx, o2).to_pack()),
+            Rvalue::NullaryOp(null_op, _) => ykpack::Rvalue::NullaryOp((*ccx, null_op).to_pack()),
+            Rvalue::UnaryOp(un_op, op) =>
+                ykpack::Rvalue::UnaryOp((*ccx, un_op).to_pack(), (*ccx, op).to_pack()),
+            Rvalue::Discriminant(place) => ykpack::Rvalue::Discriminant((*ccx, place).to_pack()),
+            Rvalue::Aggregate(ag_kind, ops) => ykpack::Rvalue::Aggregate(
+                (*ccx, ag_kind.as_ref()).to_pack(),
+                ops.iter().map(|op| (*ccx, op).to_pack()).collect()),
+        }
+    }
+}
+
+/// AggregateKind -> Pack
+impl<'tcx> ToPack<ykpack::AggregateKind> for (&ConvCx<'_, 'tcx, '_>, &AggregateKind<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::AggregateKind {
+        let (ccx, ak) = self;
+        match *ak {
+            AggregateKind::Array(_) => ykpack::AggregateKind::Array,
+            AggregateKind::Tuple => ykpack::AggregateKind::Tuple,
+            AggregateKind::Adt{..} => ykpack::AggregateKind::Unimplemented,
+            AggregateKind::Closure(def_id, _) =>
+                ykpack::AggregateKind::Closure((*ccx, def_id).to_pack()),
+            AggregateKind::Generator(def_id, ..) =>
+                ykpack::AggregateKind::Generator((*ccx, def_id).to_pack()),
+        }
+    }
+}
+
+/// BorrowKind -> Pack
+impl<'tcx> ToPack<ykpack::BorrowKind> for (&ConvCx<'_, 'tcx, '_>, &BorrowKind) {
+    fn to_pack(&mut self) -> ykpack::BorrowKind {
+        let (_ccx, bk) = self;
+        match *bk {
+            BorrowKind::Shared => ykpack::BorrowKind::Shared,
+            BorrowKind::Shallow => ykpack::BorrowKind::Shallow,
+            BorrowKind::Unique => ykpack::BorrowKind::Unique,
+            BorrowKind::Mut{..} => ykpack::BorrowKind::Mut,
+        }
+    }
+}
+
+/// BinOp -> Pack
+impl<'tcx> ToPack<ykpack::BinOp> for (&ConvCx<'_, 'tcx, '_>, &BinOp) {
+    fn to_pack(&mut self) -> ykpack::BinOp {
+        let (_ccx, op) = self;
+        match *op {
+            BinOp::Add => ykpack::BinOp::Add,
+            BinOp::Sub => ykpack::BinOp::Sub,
+            BinOp::Mul => ykpack::BinOp::Mul,
+            BinOp::Div => ykpack::BinOp::Div,
+            BinOp::Rem => ykpack::BinOp::Rem,
+            BinOp::BitXor => ykpack::BinOp::BitXor,
+            BinOp::BitAnd => ykpack::BinOp::BitAnd,
+            BinOp::BitOr => ykpack::BinOp::BitOr,
+            BinOp::Shl => ykpack::BinOp::Shl,
+            BinOp::Shr => ykpack::BinOp::Shr,
+            BinOp::Eq => ykpack::BinOp::Eq,
+            BinOp::Lt => ykpack::BinOp::Lt,
+            BinOp::Le => ykpack::BinOp::Le,
+            BinOp::Ne => ykpack::BinOp::Ne,
+            BinOp::Ge => ykpack::BinOp::Ge,
+            BinOp::Gt => ykpack::BinOp::Gt,
+            BinOp::Offset => ykpack::BinOp::Offset,
+        }
+    }
+}
+
+/// NullOp -> Pack
+impl<'tcx> ToPack<ykpack::NullOp> for (&ConvCx<'_, 'tcx, '_>, &NullOp) {
+    fn to_pack(&mut self) -> ykpack::NullOp {
+        let (_ccx, op) = self;
+        match *op {
+            NullOp::SizeOf => ykpack::NullOp::SizeOf,
+            NullOp::Box => ykpack::NullOp::Box,
+        }
+    }
+}
+
+/// UnOp -> Pack
+impl<'tcx> ToPack<ykpack::UnOp> for (&ConvCx<'_, 'tcx, '_>, &UnOp) {
+    fn to_pack(&mut self) -> ykpack::UnOp {
+        let (_ccx, op) = self;
+        match *op {
+            UnOp::Not => ykpack::UnOp::Not,
+            UnOp::Neg => ykpack::UnOp::Neg,
         }
     }
 }
