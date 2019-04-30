@@ -17,7 +17,7 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind
+    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -389,6 +389,19 @@ impl<'tcx> ToPack<ykpack::Rvalue> for (&ConvCx<'_, 'tcx, '_>, &Rvalue<'tcx>) {
                 (*ccx, borrow_kind).to_pack(),
                 (*ccx, place).to_pack(),
             ),
+            Rvalue::Len(place) => ykpack::Rvalue::Len((*ccx, place).to_pack()),
+            // Since TIR is currently untyped we consider a cast as a simple variable use.
+            Rvalue::Cast(_, oper, _) => ykpack::Rvalue::Use((*ccx, oper).to_pack()),
+            Rvalue::BinaryOp(bop, o1, o2) => ykpack::Rvalue::BinaryOp(
+                (*ccx, bop).to_pack(),
+                (*ccx, o1).to_pack(),
+                (*ccx, o2).to_pack(),
+            ),
+            Rvalue::CheckedBinaryOp(bop, o1, o2) => ykpack::Rvalue::CheckedBinaryOp(
+                (*ccx, bop).to_pack(),
+                (*ccx, o1).to_pack(),
+                (*ccx, o2).to_pack(),
+            ),
             _ => ykpack::Rvalue::Unimplemented, // FIXME
         }
     }
@@ -403,6 +416,32 @@ impl<'tcx> ToPack<ykpack::BorrowKind> for (&ConvCx<'_, 'tcx, '_>, &BorrowKind) {
             BorrowKind::Shallow => ykpack::BorrowKind::Shallow,
             BorrowKind::Unique => ykpack::BorrowKind::Unique,
             BorrowKind::Mut{..} => ykpack::BorrowKind::Mut,
+        }
+    }
+}
+
+/// BinOp -> Pack
+impl<'tcx> ToPack<ykpack::BinOp> for (&ConvCx<'_, 'tcx, '_>, &BinOp) {
+    fn to_pack(&mut self) -> ykpack::BinOp {
+        let (_ccx, op) = self;
+        match *op {
+            BinOp::Add => ykpack::BinOp::Add,
+            BinOp::Sub => ykpack::BinOp::Sub,
+            BinOp::Mul => ykpack::BinOp::Mul,
+            BinOp::Div => ykpack::BinOp::Div,
+            BinOp::Rem => ykpack::BinOp::Rem,
+            BinOp::BitXor => ykpack::BinOp::BitXor,
+            BinOp::BitAnd => ykpack::BinOp::BitAnd,
+            BinOp::BitOr => ykpack::BinOp::BitOr,
+            BinOp::Shl => ykpack::BinOp::Shl,
+            BinOp::Shr => ykpack::BinOp::Shr,
+            BinOp::Eq => ykpack::BinOp::Eq,
+            BinOp::Lt => ykpack::BinOp::Lt,
+            BinOp::Le => ykpack::BinOp::Le,
+            BinOp::Ne => ykpack::BinOp::Ne,
+            BinOp::Ge => ykpack::BinOp::Ge,
+            BinOp::Gt => ykpack::BinOp::Gt,
+            BinOp::Offset => ykpack::BinOp::Offset,
         }
     }
 }
