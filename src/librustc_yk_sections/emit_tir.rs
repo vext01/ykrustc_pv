@@ -17,7 +17,7 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Local, PlaceBase
+    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -384,7 +384,25 @@ impl<'tcx> ToPack<ykpack::Rvalue> for (&ConvCx<'_, 'tcx, '_>, &Rvalue<'tcx>) {
 
         match *rval {
             Rvalue::Use(oper) => ykpack::Rvalue::Use((*ccx, oper).to_pack()),
+            Rvalue::Repeat(oper, len) => ykpack::Rvalue::Repeat((*ccx, oper).to_pack(), *len),
+            Rvalue::Ref(_region, borrow_kind, place) => ykpack::Rvalue::Ref(
+                (*ccx, borrow_kind).to_pack(),
+                (*ccx, place).to_pack(),
+            ),
             _ => ykpack::Rvalue::Unimplemented, // FIXME
+        }
+    }
+}
+
+/// BorrowKind -> Pack
+impl<'tcx> ToPack<ykpack::BorrowKind> for (&ConvCx<'_, 'tcx, '_>, &BorrowKind) {
+    fn to_pack(&mut self) -> ykpack::BorrowKind {
+        let (_ccx, bk) = self;
+        match *bk {
+            BorrowKind::Shared => ykpack::BorrowKind::Shared,
+            BorrowKind::Shallow => ykpack::BorrowKind::Shallow,
+            BorrowKind::Unique => ykpack::BorrowKind::Unique,
+            BorrowKind::Mut{..} => ykpack::BorrowKind::Mut,
         }
     }
 }
