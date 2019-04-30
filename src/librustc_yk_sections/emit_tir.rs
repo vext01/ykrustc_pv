@@ -10,6 +10,8 @@
 //! This module converts MIR into Yorick TIR (Tracing IR).
 //! Note that we preserve the MIR block structure when lowering to TIR.
 //!
+//! Note also that TIR is currently untyped.
+//!
 //! Serialisation itself is performed by an external library: ykpack.
 
 use rustc::ty::TyCtxt;
@@ -17,7 +19,7 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp
+    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp, UnOp, NullOp
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -402,7 +404,11 @@ impl<'tcx> ToPack<ykpack::Rvalue> for (&ConvCx<'_, 'tcx, '_>, &Rvalue<'tcx>) {
                 (*ccx, o1).to_pack(),
                 (*ccx, o2).to_pack(),
             ),
-            _ => ykpack::Rvalue::Unimplemented, // FIXME
+            Rvalue::NullaryOp(null_op, _) => ykpack::Rvalue::NullaryOp((*ccx, null_op).to_pack()),
+            Rvalue::UnaryOp(un_op, op) => ykpack::Rvalue::UnaryOp((*ccx, un_op).to_pack(), (*ccx, op).to_pack()),
+            Rvalue::Discriminant(place) => ykpack::Rvalue::Discriminant((*ccx, place).to_pack()),
+            // Aggregate values are optimised away in the final MIR.
+            Rvalue::Aggregate(..) => unreachable!("Rvalue::Aggregate encountered"),
         }
     }
 }
@@ -442,6 +448,26 @@ impl<'tcx> ToPack<ykpack::BinOp> for (&ConvCx<'_, 'tcx, '_>, &BinOp) {
             BinOp::Ge => ykpack::BinOp::Ge,
             BinOp::Gt => ykpack::BinOp::Gt,
             BinOp::Offset => ykpack::BinOp::Offset,
+        }
+    }
+}
+
+impl<'tcx> ToPack<ykpack::NullOp> for (&ConvCx<'_, 'tcx, '_>, &NullOp) {
+    fn to_pack(&mut self) -> ykpack::NullOp {
+        let (_ccx, op) = self;
+        match *op {
+            NullOp::SizeOf => ykpack::NullOp::SizeOf,
+            NullOp::Box => ykpack::NullOp::Box,
+        }
+    }
+}
+
+impl<'tcx> ToPack<ykpack::UnOp> for (&ConvCx<'_, 'tcx, '_>, &UnOp) {
+    fn to_pack(&mut self) -> ykpack::UnOp {
+        let (_ccx, op) = self;
+        match *op {
+            UnOp::Not => ykpack::UnOp::Not,
+            UnOp::Neg => ykpack::UnOp::Neg,
         }
     }
 }
