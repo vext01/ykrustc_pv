@@ -264,6 +264,8 @@ impl<'tcx> ToPack<ykpack::Terminator> for (&ConvCx<'_, 'tcx, '_>, &Terminator<'t
                     unwind_bb: unwind_bb.map(|bb| u32::from(bb)),
                 },
             TerminatorKind::Call{ref func, cleanup: cleanup_bb, ref destination, .. } => {
+                // In MIR, a call instruction accepts an arbitrary operand, but in TIR we special
+                // case the call targets.
                 let ser_oper = if let Operand::Constant(box Constant {
                     literal: LazyConst::Evaluated(Const {
                         ty: &TyS {
@@ -363,13 +365,25 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
     }
 }
 
+/// Operand -> Pack
+impl<'tcx> ToPack<ykpack::Operand> for (&ConvCx<'_, 'tcx, '_>, &Operand<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::Operand {
+        let (ccx, op) = self;
+
+        match *op {
+            Operand::Move(place) | Operand::Copy(place) => ykpack::Operand::Place((*ccx, place).to_pack()),
+            _ => ykpack::Operand::Unimplemented, // FIXME
+        }
+    }
+}
+
 /// Rvalue -> Pack
 impl<'tcx> ToPack<ykpack::Rvalue> for (&ConvCx<'_, 'tcx, '_>, &Rvalue<'tcx>) {
     fn to_pack(&mut self) -> ykpack::Rvalue {
         let (ccx, rval) = self;
 
         match *rval {
-            Rvalue::Use(Operand::Move(place)) => ykpack::Rvalue::Place((*ccx, place).to_pack()),
+            Rvalue::Use(oper) => ykpack::Rvalue::Use((*ccx, oper).to_pack()),
             _ => ykpack::Rvalue::Unimplemented, // FIXME
         }
     }
