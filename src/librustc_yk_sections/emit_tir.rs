@@ -307,7 +307,7 @@ impl<'tcx> ToPack<ykpack::BasicBlock> for
     fn to_pack(&mut self) -> ykpack::BasicBlock {
         let (ccx, bb, bb_data) = self;
         let ser_stmts = bb_data.statements.iter().map(|stmt| (*ccx, *bb, stmt).to_pack());
-        ykpack::BasicBlock::new(ser_stmts.collect(),
+        ykpack::BasicBlock::new(ser_stmts.filter(|s| *s != ykpack::Statement::Nop).collect(),
             (*ccx, bb_data.terminator.as_ref().unwrap()).to_pack())
     }
 }
@@ -326,7 +326,27 @@ impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &St
                 }
                 ykpack::Statement::Assign(lhs, rhs)
             },
-            _ => ykpack::Statement::Unimplemented,
+            StatementKind::SetDiscriminant{ref place, ref variant_index} => {
+                ykpack::Statement::SetDiscriminant{
+                    place: (*ccx, place).to_pack(),
+                    variant_index: variant_index.as_u32(),
+                }
+            },
+            // StorageLive/Dead and fake reads are not useful the tracer. Ignore them.
+            StatementKind::StorageLive(..)
+            | StatementKind::StorageDead(..)
+            | StatementKind::FakeRead(..) => ykpack::Statement::Nop,
+            StatementKind::InlineAsm{..} =>
+                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::InlineAsm),
+            // Retagging (for stacked borrows).
+            // https://www.ralfj.de/blog/2018/08/07/stacked-borrows.html
+            StatementKind::Retag(..) =>
+                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::Retag),
+            // Type ascription.
+            // https://github.com/rust-lang/rfcs/pull/803
+            StatementKind::AscribeUserType(..) =>
+                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::AscribeUserType),
+            StatementKind::Nop => ykpack::Statement::Nop,
         }
     }
 }
