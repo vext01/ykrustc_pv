@@ -18,7 +18,7 @@ use rustc::ty::TyCtxt;
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
-    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp, UnOp, NullOpD //, Projection,
+    Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp, UnOp, NullOp, Projection,
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -30,6 +30,7 @@ use std::io::Write;
 use std::error::Error;
 use std::cell::{Cell, RefCell};
 use std::mem::size_of;
+use std::marker::PhantomData;
 use rustc_data_structures::bit_set::BitSet;
 use rustc_data_structures::indexed_vec::IndexVec;
 use ykpack;
@@ -367,28 +368,21 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
 }
 
 /// Projection -> Pack
-//impl<'tcx, B, V, T> ToPack<ykpack::Projection> for (&ConvCx<'_, 'tcx, '_>, &Projection<'tcx, B, V, T>) {
-//    fn to_pack(&mut self) -> ykpack::Projection {
-//        let (ccx, pj) = self;
-//
-//        ykpack::Projection {
-//            base: (*ccx, pj.base).to_pack(),
-//            elem: ykpack::ProjectionElem::Unimplemented, // FIXME
-//        }
-//    }
-//}
+impl<'tcx, B, V, T, PB, PV> ToPack<ykpack::Projection<PB, PV>> for (&ConvCx<'_, 'tcx, '_>, &Projection<'tcx, B, V, T>) {
+    fn to_pack(&mut self) -> ykpack::Projection<PB, PV> {
+        let (ccx, pj) = self;
 
-//impl<'tcx, B, V, T> ToPack<ykpack::Projection> for (&ConvCx<'_, 'tcx, '_>, &Box<Projection<'tcx, B, V, T>>) {
-//    fn to_pack(&mut self) -> ykpack::Projection {
-//        let (ccx, pj) = self;
-//        (*ccx, pj.as_ref()).to_pack()
-//    }
-//}
+        ykpack::Projection {
+            base: (*ccx, pj.base).to_pack(),
+            elem: ykpack::ProjectionElem::Unimplemented(PhantomData), // FIXME
+        }
+    }
+}
 
-impl<'tcx, B> ToPack<ykpack::Projection> for (&ConvCx<'_, 'tcx, '_>, B) {
-    fn to_pack(&mut self) -> ykpack::Projection {
-        let (ccx, b) = self;
-        (*ccx, b).to_pack()
+impl<'tcx, B, V, T, PB, PV> ToPack<ykpack::Projection<PB, PV>> for (&ConvCx<'_, 'tcx, '_>, &Box<Projection<'tcx, B, V, T>>) {
+    fn to_pack(&mut self) -> ykpack::Projection<PB, PV> {
+        let (ccx, pj) = self;
+        (*ccx, pj.as_ref()).to_pack()
     }
 }
 
