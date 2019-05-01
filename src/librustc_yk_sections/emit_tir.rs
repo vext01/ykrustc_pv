@@ -368,19 +368,19 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
 }
 
 /// Projection -> Pack
-impl<'tcx, B, V, T, PB, PV> ToPack<ykpack::Projection<PB, PV>> for (&ConvCx<'_, 'tcx, '_>, &Projection<'tcx, B, V, T>) {
-    fn to_pack(&mut self) -> ykpack::Projection<PB, PV> {
+impl<'tcx, T> ToPack<ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex>> for (&ConvCx<'_, 'tcx, '_>, &Projection<'tcx, Place<'tcx>, Local, T>) {
+    fn to_pack(&mut self) -> ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex> {
         let (ccx, pj) = self;
 
         ykpack::Projection {
-            base: (*ccx, pj.base).to_pack(),
+            base: Box::new((*ccx, &pj.base).to_pack()),
             elem: ykpack::ProjectionElem::Unimplemented(PhantomData), // FIXME
         }
     }
 }
 
-impl<'tcx, B, V, T, PB, PV> ToPack<ykpack::Projection<PB, PV>> for (&ConvCx<'_, 'tcx, '_>, &Box<Projection<'tcx, B, V, T>>) {
-    fn to_pack(&mut self) -> ykpack::Projection<PB, PV> {
+impl<'tcx, T> ToPack<ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex>> for (&ConvCx<'_, 'tcx, '_>, &Box<Projection<'tcx, Place<'tcx>, Local, T>>) {
+    fn to_pack(&mut self) -> ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex> {
         let (ccx, pj) = self;
         (*ccx, pj.as_ref()).to_pack()
     }
