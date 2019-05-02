@@ -9,8 +9,6 @@
 //! This module converts MIR into Yorick TIR (Tracing IR).
 //! Note that we preserve the MIR block structure when lowering to TIR.
 //!
-//! Note also that TIR is currently untyped.
-//!
 //! Serialisation itself is performed by an external library: ykpack.
 
 use rustc::ty::TyCtxt;
