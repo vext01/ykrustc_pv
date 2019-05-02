@@ -362,13 +362,15 @@ impl<'tcx> ToPack<ykpack::Place> for (&ConvCx<'_, 'tcx, '_>, &Place<'tcx>) {
 }
 
 /// Projection -> Pack
-impl<'tcx, T> ToPack<ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex>>
+/// In Rust, projections are parameterised, but there is only ever one concrete instantiation, so
+/// we lower to a concrete `PlaceProjection`.
+impl<'tcx, T> ToPack<ykpack::PlaceProjection>
     for (&ConvCx<'_, 'tcx, '_>, &Projection<'tcx, Place<'tcx>, Local, T>)
 {
-    fn to_pack(&mut self) -> ykpack::Projection<Box<ykpack::Place>, ykpack::LocalIndex> {
+    fn to_pack(&mut self) -> ykpack::PlaceProjection {
         let (ccx, pj) = self;
 
-        ykpack::Projection {
+        ykpack::PlaceProjection {
             base: Box::new((*ccx, &pj.base).to_pack()),
             elem: ykpack::ProjectionElem::Unimplemented(PhantomData), // FIXME
         }
