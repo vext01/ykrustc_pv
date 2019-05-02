@@ -338,8 +338,7 @@ impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &St
             // StorageLive/Dead not useful to the tracer. Ignore them.
             StatementKind::StorageLive(..)
             | StatementKind::StorageDead(..) => ykpack::Statement::Nop,
-            StatementKind::InlineAsm{..} =>
-                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::InlineAsm),
+            StatementKind::InlineAsm{..} => ykpack::Statement::Unimplemented,
             // These MIR statements all codegen to nothing, and are thus nops for us too. See
             // codegen_statement() in librustc_codegen_ssa for proof.
             StatementKind::Retag(..)
