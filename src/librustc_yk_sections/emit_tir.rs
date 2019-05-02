@@ -335,21 +335,17 @@ impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &St
                     variant_index: variant_index.as_u32(),
                 }
             },
-            // StorageLive/Dead and fake reads are not useful the tracer. Ignore them.
+            // StorageLive/Dead not useful to the tracer. Ignore them.
             StatementKind::StorageLive(..)
-            | StatementKind::StorageDead(..)
-            | StatementKind::FakeRead(..) => ykpack::Statement::Nop,
+            | StatementKind::StorageDead(..) => ykpack::Statement::Nop,
             StatementKind::InlineAsm{..} =>
                 ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::InlineAsm),
-            // Retagging (for stacked borrows).
-            // https://www.ralfj.de/blog/2018/08/07/stacked-borrows.html
-            StatementKind::Retag(..) =>
-                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::Retag),
-            // Type ascription.
-            // https://github.com/rust-lang/rfcs/pull/803
-            StatementKind::AscribeUserType(..) =>
-                ykpack::Statement::Unimplemented(ykpack::UnimplementedStatement::AscribeUserType),
-            StatementKind::Nop => ykpack::Statement::Nop,
+            // These MIR statements all codegen to nothing, and are thus nops for us too. See
+            // codegen_statement() in librustc_codegen_ssa for proof.
+            StatementKind::Retag(..)
+            | StatementKind::AscribeUserType(..)
+            | StatementKind::FakeRead(..)
+            | StatementKind::Nop => ykpack::Statement::Nop,
         }
     }
 }
