@@ -329,12 +329,8 @@ impl<'tcx> ToPack<ykpack::Statement> for (&ConvCx<'_, 'tcx, '_>, BasicBlock, &St
                 }
                 ykpack::Statement::Assign(lhs, rhs)
             },
-            StatementKind::SetDiscriminant{ref place, ref variant_index} => {
-                ykpack::Statement::SetDiscriminant{
-                    place: (*ccx, place).to_pack(),
-                    variant_index: variant_index.as_u32(),
-                }
-            },
+            StatementKind::SetDiscriminant{ref place, ref variant_index} =>
+                ykpack::Statement::SetDiscriminant((*ccx, place).to_pack(), variant_index.as_u32()),
             // StorageLive/Dead not useful to the tracer. Ignore them.
             StatementKind::StorageLive(..)
             | StatementKind::StorageDead(..) => ykpack::Statement::Nop,
