@@ -32,6 +32,7 @@ use std::mem::size_of;
 use std::marker::PhantomData;
 use rustc_data_structures::bit_set::BitSet;
 use rustc_data_structures::indexed_vec::IndexVec;
+use rustc::mir::interpret::{Scalar, ConstValue};
 use ykpack;
 use ykpack::LocalIndex as TirLocal;
 use rustc_data_structures::fx::FxHashSet;
@@ -394,7 +395,7 @@ impl<'tcx> ToPack<ykpack::Operand> for (&ConvCx<'_, 'tcx, '_>, &Operand<'tcx>) {
         match *op {
             Operand::Move(place) | Operand::Copy(place)
                 => ykpack::Operand::Place((*ccx, place).to_pack()),
-            _ => ykpack::Operand::Unimplemented, // FIXME
+            Operand::Constant(cst) => ykpack::Operand::Constant((*ccx, cst.as_ref()).to_pack()),
         }
     }
 }
@@ -505,6 +506,58 @@ impl<'tcx> ToPack<ykpack::UnOp> for (&ConvCx<'_, 'tcx, '_>, &UnOp) {
         match *op {
             UnOp::Not => ykpack::UnOp::Not,
             UnOp::Neg => ykpack::UnOp::Neg,
+        }
+    }
+}
+
+/// Constant -> Pack
+impl<'tcx> ToPack<ykpack::Constant> for (&ConvCx<'_, 'tcx, '_>, &Constant<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::Constant {
+        let (ccx, cst) = self;
+        (*ccx, cst.literal).to_pack()
+    }
+}
+
+/// LazyConst -> Pack
+impl<'tcx> ToPack<ykpack::Constant> for (&ConvCx<'_, 'tcx, '_>, &LazyConst<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::Constant {
+        let (ccx, lconst) = self;
+        if let LazyConst::Evaluated(cst) = lconst {
+            (*ccx, cst).to_pack()
+        } else {
+            // In the final MIR everything should be evaluated.
+            //panic!("Encountered unevaluated constant!");
+            ykpack::Constant::Unimplemented
+        }
+    }
+}
+
+/// Const -> Pack
+impl<'tcx> ToPack<ykpack::Constant> for (&ConvCx<'_, 'tcx, '_>, &Const<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::Constant {
+        let (ccx, cst) = self;
+        (*ccx, &cst.val).to_pack()
+    }
+}
+
+/// ConstValue -> Pack
+impl<'tcx> ToPack<ykpack::Constant> for (&ConvCx<'_, 'tcx, '_>, &ConstValue<'tcx>) {
+    fn to_pack(&mut self) -> ykpack::Constant {
+        let (ccx, cv) = self;
+        match cv {
+            ConstValue::Scalar(s) => ykpack::Constant::Scalar((*ccx, s).to_pack()),
+            _ => ykpack::Constant::Unimplemented,
+        }
+    }
+}
+
+/// Scalar -> Pack
+impl<'tcx> ToPack<ykpack::Scalar> for (&ConvCx<'_, 'tcx, '_>, &Scalar) {
+    fn to_pack(&mut self) -> ykpack::Scalar {
+        let (_ccx, sc) = self;
+        match sc {
+            Scalar::Bits{size, bits} => ykpack::Scalar::bits_from_u128(*size, *bits),
+            _ => ykpack::Scalar::Unimplemented,
         }
     }
 }
