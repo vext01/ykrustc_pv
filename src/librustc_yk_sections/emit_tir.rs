@@ -17,7 +17,7 @@ use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Mir, TerminatorKind, Operand, Constant, StatementKind, BasicBlock, BasicBlockData, Terminator,
     Place, Rvalue, Statement, Local, PlaceBase, BorrowKind, BinOp, UnOp, NullOp, Projection,
-    AggregateKind
+    AggregateKind, ProjectionElem
 };
 use rustc::ty::{TyS, TyKind, Const, LazyConst};
 use rustc::util::nodemap::DefIdSet;
@@ -29,7 +29,6 @@ use std::io::Write;
 use std::error::Error;
 use std::cell::{Cell, RefCell};
 use std::mem::size_of;
-use std::marker::PhantomData;
 use rustc_data_structures::bit_set::BitSet;
 use rustc_data_structures::indexed_vec::IndexVec;
 use rustc::mir::interpret::{Scalar, ConstValue};
@@ -369,8 +368,35 @@ impl<'tcx, T> ToPack<ykpack::PlaceProjection>
 
         ykpack::PlaceProjection {
             base: Box::new((*ccx, &pj.base).to_pack()),
-            elem: ykpack::ProjectionElem::Unimplemented(PhantomData), // FIXME
+            elem: (*ccx, &pj.elem).to_pack(),
         }
+    }
+}
+
+/// ProjectionElem -> Pack
+impl<'tcx, T> ToPack<ykpack::ProjectionElem<ykpack::LocalIndex>>
+    for (&ConvCx<'_, 'tcx, '_>, &ProjectionElem<'tcx, Local, T>)
+{
+    fn to_pack(&mut self) -> ykpack::ProjectionElem<ykpack::LocalIndex> {
+        let (ccx, pp) = self;
+
+        match pp {
+            ProjectionElem::Deref => ykpack::ProjectionElem::Deref,
+            ProjectionElem::Field(f, _) => ykpack::ProjectionElem::Field(f.as_u32()),
+            ProjectionElem::Index(v) => ykpack::ProjectionElem::Index((*ccx, v).to_pack()),
+            ProjectionElem::ConstantIndex{offset, min_length, from_end} =>
+                ykpack::ProjectionElem::ConstantIndex{offset: *offset, min_length: *min_length, from_end: *from_end},
+            ProjectionElem::Subslice {from, to} => ykpack::ProjectionElem::Subslice{from: *from, to: *to},
+            ProjectionElem::Downcast(_, variant) => ykpack::ProjectionElem::Downcast(variant.as_u32()),
+        }
+    }
+}
+
+/// Local -> Pack
+impl<'tcx> ToPack<ykpack::LocalIndex> for (&ConvCx<'_, 'tcx, '_>, &Local) {
+    fn to_pack(&mut self) -> ykpack::LocalIndex {
+        let (ccx, l) = self;
+        ccx.tir_var(**l)
     }
 }
 
@@ -380,7 +406,7 @@ impl<'tcx> ToPack<ykpack::PlaceBase> for (&ConvCx<'_, 'tcx, '_>, &PlaceBase<'tcx
         let (ccx, pb) = self;
 
         match pb {
-            PlaceBase::Local(local) => ykpack::PlaceBase::Local(ccx.tir_var(*local)),
+            PlaceBase::Local(local) => ykpack::PlaceBase::Local((*ccx, local).to_pack()),
             PlaceBase::Static(s) => ykpack::PlaceBase::Static((*ccx, &s.as_ref().def_id).to_pack()),
             PlaceBase::Promoted(bx) => ykpack::PlaceBase::Promoted(bx.0.as_u32()),
         }
