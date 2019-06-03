@@ -407,6 +407,7 @@ symbols! {
         no_implicit_prelude,
         no_inline,
         no_link,
+        no_trace,
         no_main,
         no_mangle,
         non_ascii_idents,
