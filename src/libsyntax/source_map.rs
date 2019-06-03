@@ -30,8 +30,8 @@ use errors::SourceMapper;
 /// otherwise return the call site span up to the `enclosing_sp` by
 /// following the `expn_info` chain.
 pub fn original_sp(sp: Span, enclosing_sp: Span) -> Span {
-    let call_site1 = sp.ctxt().outer().expn_info().map(|ei| ei.call_site);
-    let call_site2 = enclosing_sp.ctxt().outer().expn_info().map(|ei| ei.call_site);
+    let call_site1 = sp.ctxt().outer_expn_info().map(|ei| ei.call_site);
+    let call_site2 = enclosing_sp.ctxt().outer_expn_info().map(|ei| ei.call_site);
     match (call_site1, call_site2) {
         (None, _) => sp,
         (Some(call_site1), Some(call_site2)) if call_site1 == call_site2 => sp,
@@ -388,16 +388,6 @@ impl SourceMap {
         }
     }
 
-    pub fn lookup_char_pos_adj(&self, pos: BytePos) -> LocWithOpt {
-        let loc = self.lookup_char_pos(pos);
-        LocWithOpt {
-            filename: loc.file.name.clone(),
-            line: loc.line,
-            col: loc.col,
-            file: Some(loc.file)
-        }
-    }
-
     /// Returns `Some(span)`, a union of the lhs and rhs span. The lhs must precede the rhs. If
     /// there are gaps between lhs and rhs, the resulting union will cross these gaps.
     /// For this to work, the spans have to be:
@@ -438,10 +428,10 @@ impl SourceMap {
             return "no-location".to_string();
         }
 
-        let lo = self.lookup_char_pos_adj(sp.lo());
-        let hi = self.lookup_char_pos_adj(sp.hi());
+        let lo = self.lookup_char_pos(sp.lo());
+        let hi = self.lookup_char_pos(sp.hi());
         format!("{}:{}:{}: {}:{}",
-                        lo.filename,
+                        lo.file.name,
                         lo.line,
                         lo.col.to_usize() + 1,
                         hi.line,
@@ -737,6 +727,11 @@ impl SourceMap {
         debug!("find_width_of_character_at_span: local_begin=`{:?}`, local_end=`{:?}`",
                local_begin, local_end);
 
+        if local_begin.sf.start_pos != local_end.sf.start_pos {
+            debug!("find_width_of_character_at_span: begin and end are in different files");
+            return 1;
+        }
+
         let start_index = local_begin.pos.to_usize();
         let end_index = local_end.pos.to_usize();
         debug!("find_width_of_character_at_span: start_index=`{:?}`, end_index=`{:?}`",
@@ -939,6 +934,27 @@ impl SourceMap {
         }
 
         None
+    }
+
+    /// Reuses the span but adds information like the kind of the desugaring and features that are
+    /// allowed inside this span.
+    pub fn mark_span_with_reason(
+        &self,
+        reason: hygiene::CompilerDesugaringKind,
+        span: Span,
+        allow_internal_unstable: Option<Lrc<[symbol::Symbol]>>,
+    ) -> Span {
+        let mark = Mark::fresh(Mark::root());
+        mark.set_expn_info(ExpnInfo {
+            call_site: span,
+            def_site: Some(span),
+            format: CompilerDesugaring(reason),
+            allow_internal_unstable,
+            allow_internal_unsafe: false,
+            local_inner_macros: false,
+            edition: edition::Edition::from_session(),
+        });
+        span.with_ctxt(SyntaxContext::empty().apply_mark(mark))
     }
 }
 
