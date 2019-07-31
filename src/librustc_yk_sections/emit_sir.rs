@@ -57,6 +57,8 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     mir: &'a Body<'tcx>,
     /// The DefId of the above MIR.
     def_id: DefId,
+    /// Extra DefIds encountered during the lowering.
+    extra_def_ids: DefIdSet,
 }
 
 impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
@@ -67,6 +69,7 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
             var_map: IndexVec::new(),
             mir,
             def_id,
+            extra_def_ids: DefIdSet::default(),
         }
     }
 
@@ -99,10 +102,11 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
     }
 
     /// Entry point for the lowering process.
-    fn lower(&mut self) -> ykpack::Body {
+    fn lower(mut self) -> (ykpack::Body, DefIdSet) {
         let dps = self.tcx.def_path_str(self.def_id);
-        ykpack::Body::new(self.lower_def_id(&self.def_id.to_owned()),
-            dps, self.mir.basic_blocks().iter().map(|b| self.lower_block(b)).collect())
+        let body = ykpack::Body::new(self.lower_def_id(&self.def_id.to_owned()),
+            dps, self.mir.basic_blocks().iter().map(|b| self.lower_block(b)).collect());
+        (body, self.extra_def_ids)
     }
 
     fn lower_def_id(&mut self, def_id: &DefId) -> ykpack::DefId {
@@ -171,6 +175,7 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
                         true => None,
                         false => Some(self.tcx.symbol_name(inst).as_str().get().to_owned()),
                     };
+                    self.extra_def_ids.insert(*target_def_id);
                     ykpack::CallOperand::Fn(self.lower_def_id(target_def_id), sym_name)
                 } else {
                     // FIXME -- implement other callables.
@@ -390,28 +395,41 @@ fn do_generate_sir<'a, 'tcx, 'gcx>(
         _ => None,
     };
 
-    // To satisfy the reproducible build tests, the CFG must be written out in a deterministic
-    // order, thus we sort the `DefId`s first.
-    let mut sorted_def_ids: Vec<&DefId> = def_ids.iter().collect();
-    sorted_def_ids.sort();
+    // We use a worklist because as we lower MIR bodies we will discover further DefIds (e.g. call
+    // targets) which in turn will need to be processed. However, to satisfy the reproducible build
+    // tests, we must process the DefIds in a deterministic order. To that end all newly discovered
+    // work must be sorted before it is appended into the work list.
+    let mut work: Vec<DefId> = def_ids.iter().cloned().collect();
+    work.sort();
+    let mut seen =  DefIdSet::default();
+    while !work.is_empty() {
+        let def_id = work.pop().unwrap();
+        if seen.contains(&def_id) {
+            continue;
+        }
 
-    for def_id in sorted_def_ids {
-        if tcx.is_mir_available(*def_id) {
-            let mir = tcx.optimized_mir(*def_id);
-            let mut ccx = ConvCx::new(tcx, *def_id, mir);
-            let pack = ccx.lower();
+        if tcx.is_mir_available(def_id) {
+            let mir = tcx.optimized_mir(def_id);
+            let ccx = ConvCx::new(tcx, def_id, mir);
+            let (pack, mut extra_work) = ccx.lower();
 
             if let Some(ref mut e) = enc {
                 e.serialise(ykpack::Pack::Body(pack))?;
             } else {
                 write!(textdump_file.as_ref().unwrap(), "{}", pack)?;
             }
+
+            let mut extra_work_sorted: Vec<DefId> = extra_work.drain().collect();
+            extra_work_sorted.sort();
+            work.extend(extra_work_sorted);
         }
 
         if let Some(ref mut e) = enc {
             e.serialise(ykpack::Pack::Debug(ykpack::SirDebug::new(
-                lower_def_id(tcx, def_id), tcx.def_path_str(*def_id))))?;
+                lower_def_id(tcx, &def_id), tcx.def_path_str(def_id))))?;
         }
+
+        seen.insert(def_id);
     }
 
     if let Some(e) = enc {
