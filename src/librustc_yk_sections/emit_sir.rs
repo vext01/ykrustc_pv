@@ -18,8 +18,9 @@ use syntax::ast::{UintTy, IntTy};
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
     Body, Local, BasicBlockData, Statement, StatementKind, Place, PlaceBase, Rvalue, Operand,
-    Terminator, TerminatorKind, Constant, BinOp
+    Terminator, TerminatorKind, Constant, BinOp, NullOp
 };
+use rustc::middle::lang_items::ExchangeMallocFnLangItem;
 use rustc::mir::interpret::{ConstValue, Scalar};
 use rustc::util::nodemap::DefIdSet;
 use std::path::PathBuf;
@@ -252,6 +253,13 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
             Rvalue::BinaryOp(bin_op, o1, o2) =>
                 Ok(ykpack::Rvalue::BinaryOp(self.lower_binary_op(*bin_op), self.lower_operand(o1)?,
                     self.lower_operand(o2)?)),
+            Rvalue::NullaryOp(NullOp::Box, _) => {
+                let def_id = self.tcx.lang_items()
+                    .require(ExchangeMallocFnLangItem)
+                    .expect("can't find DefId for ExchangeMallocFnLangItem");
+                self.extra_def_ids.insert(def_id);
+                Err(()) // FIXME: decide how to lower boxes.
+            },
             _ => Err(()),
         }
     }
