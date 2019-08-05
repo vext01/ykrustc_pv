@@ -92,6 +92,13 @@ pub fn get_vtable<'tcx, Cx: CodegenMethods<'tcx>>(
 
     let methods = methods.cloned().map(|opt_mth| {
         opt_mth.map_or(nullptr, |(def_id, substs)| {
+            let inst = ty::Instance::resolve_for_vtable(
+                tcx,
+                ty::ParamEnv::reveal_all(),
+                def_id,
+                substs,
+            );
+            tcx.sess.yk_promoted_def_ids.borrow_mut().insert(inst.unwrap().def_id());
             callee::resolve_and_get_fn_for_vtable(cx, def_id, substs)
         })
     });
@@ -101,8 +108,10 @@ pub fn get_vtable<'tcx, Cx: CodegenMethods<'tcx>>(
     // If you touch this code, be sure to also make the corresponding changes to
     // `get_vtable` in rust_mir/interpret/traits.rs
     // /////////////////////////////////////////////////////////////////////////////////////////////
+    let drop_inst = Instance::resolve_drop_in_place(cx.tcx(), ty);
+    tcx.sess.yk_promoted_def_ids.borrow_mut().insert(drop_inst.def_id());
     let components: Vec<_> = [
-        cx.get_fn(Instance::resolve_drop_in_place(cx.tcx(), ty)),
+        cx.get_fn(drop_inst),
         cx.const_usize(layout.size.bytes()),
         cx.const_usize(layout.align.abi.bytes())
     ].iter().cloned().chain(methods).collect();

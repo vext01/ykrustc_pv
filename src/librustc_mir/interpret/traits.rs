@@ -56,6 +56,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> InterpretCx<'a, 'mir, 'tcx, M> 
         let tcx = &*self.tcx;
 
         let drop = Instance::resolve_drop_in_place(*tcx, ty);
+        self.tcx.sess.yk_promoted_def_ids.borrow_mut().insert(drop.def_id().clone());
         let drop = self.memory.create_fn_alloc(drop);
 
         // no need to do any alignment checks on the memory accesses below, because we know the
@@ -89,6 +90,8 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> InterpretCx<'a, 'mir, 'tcx, M> 
                 self.memory
                     .get_mut(method_ptr.alloc_id)?
                     .write_ptr_sized(tcx, method_ptr, Scalar::Ptr(fn_ptr).into())?;
+
+                self.tcx.sess.yk_promoted_def_ids.borrow_mut().insert(instance.def_id().clone());
             }
         }
 

@@ -13,7 +13,7 @@
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
-use rustc::ty::{TyCtxt, TyS, Const, TyKind, Ty, Instance};
+use rustc::ty::{TyCtxt, Const, TyKind, Ty, Instance};
 use syntax::ast::{UintTy, IntTy};
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
@@ -62,8 +62,8 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     callee_def_ids: DefIdSet,
 }
 
-impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
-    fn new(tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_id: DefId, mir: &'a Body<'tcx>) -> Self {
+impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
+    fn new(tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId, mir: &'a Body<'tcx>) -> Self {
         Self {
             tcx,
             next_sir_var: 0,
@@ -162,22 +162,36 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
                     target_bb: u32::from(target_bb),
                 }),
             TerminatorKind::Call{ref func, ref destination, .. } => {
-                let ser_oper = if let Operand::Constant(box Constant {
-                    literal: Const {
-                        ty: &TyS {
-                            sty: TyKind::FnDef(ref target_def_id, ref substs), ..
-                        }, ..
-                    }, ..
-                }, ..) = func {
-                    // A statically known call target.
-                    let inst = Instance::new(*target_def_id, substs);
-                    let sym_name = match substs.needs_subst() {
-                        // If the instance isn't full instantiated, then it has no symbol name.
-                        true => None,
-                        false => Some(self.tcx.symbol_name(inst).as_str().get().to_owned()),
-                    };
-                    self.callee_def_ids.insert(*target_def_id);
-                    ykpack::CallOperand::Fn(self.lower_def_id(target_def_id), sym_name)
+                let ser_oper = if let Operand::Constant(box Constant { literal: Const { ty: const_ty, .. }, ..}) = func {
+                    match const_ty.sty {
+                        // A statically known call target.
+                        TyKind::FnDef(ref target_def_id, ref substs) => {
+                            let inst = Instance::new(*target_def_id, substs);
+                            let sym_name = match substs.needs_subst() {
+                                // If the instance isn't full instantiated, then it has no symbol name.
+                                true => None,
+                                false => Some(self.tcx.symbol_name(inst).as_str().get().to_owned()),
+                            };
+                            self.callee_def_ids.insert(*target_def_id);
+                            ykpack::CallOperand::Fn(self.lower_def_id(target_def_id), sym_name)
+                        },
+                        // A dynamic call target (e.g. via a trait object).
+                        TyKind::Dynamic(ref binder, ..) => {
+                            dbg!(binder);
+                            if let Some(trait_ref) = binder.principal() {
+                                let methods_root = self.tcx.vtable_methods(trait_ref.with_self_ty(*self.tcx, const_ty));
+                                dbg!(methods_root);
+                                for meth in methods_root {
+                                    if let Some((def_id, _)) = meth {
+                                        dbg!(self.tcx.def_path_str(*def_id));
+                                        self.callee_def_ids.insert(*def_id);
+                                    }
+                                }
+                            }
+                            ykpack::CallOperand::Unknown // FIXME -- decide how to serialise.
+                        },
+                        _ => ykpack::CallOperand::Unknown,
+                    }
                 } else {
                     // FIXME -- implement other callables.
                     ykpack::CallOperand::Unknown
@@ -354,11 +368,11 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'gcx> {
 }
 
 /// Writes SIR to file for the specified DefIds, possibly returning a linkable ELF object.
-pub fn generate_sir<'a, 'tcx, 'gcx>(
-    tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, mode: SirMode)
+pub fn generate_sir<'a, 'tcx>(
+    tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, def_ids: &DefIdSet, promoted_def_ids: &DefIdSet, mode: SirMode)
     -> Result<Option<YkExtraLinkObject>, Box<dyn Error>>
 {
-    let sir_path = do_generate_sir(tcx, def_ids, &mode)?;
+    let sir_path = do_generate_sir(tcx, def_ids, promoted_def_ids, &mode)?;
     match mode {
         SirMode::Default(_) => {
             // In this case the file at `sir_path` is a raw binary file which we use to make an
@@ -377,8 +391,8 @@ pub fn generate_sir<'a, 'tcx, 'gcx>(
     }
 }
 
-fn do_generate_sir<'a, 'tcx, 'gcx>(
-    tcx: &'a TyCtxt<'a, 'tcx, 'gcx>, def_ids: &DefIdSet, mode: &SirMode)
+fn do_generate_sir<'a, 'tcx>(
+    tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, def_ids: &DefIdSet, promoted_def_ids: &DefIdSet, mode: &SirMode)
     -> Result<PathBuf, Box<dyn Error>>
 {
     let (sir_path, mut default_file, textdump_file) = match mode {
@@ -407,7 +421,7 @@ fn do_generate_sir<'a, 'tcx, 'gcx>(
     // targets) which in turn will need to be processed. However, to satisfy the reproducible build
     // tests, we must process the DefIds in a deterministic order. To that end all newly discovered
     // work must be sorted before it is appended into the work list.
-    let mut work: Vec<DefId> = def_ids.iter().cloned().collect();
+    let mut work: Vec<DefId> = def_ids.iter().chain(promoted_def_ids.iter()).cloned().collect();
     work.sort();
     let mut seen =  DefIdSet::default();
     while !work.is_empty() {

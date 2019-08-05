@@ -860,11 +860,11 @@ fn collect_and_partition_mono_items<'a, 'tcx>(
             }
         }
         None => {
-            if tcx.sess.opts.cg.link_dead_code {
+            //if tcx.sess.opts.cg.link_dead_code {
                 MonoItemCollectionMode::Eager
-            } else {
-                MonoItemCollectionMode::Lazy
-            }
+            //} else {
+            //    MonoItemCollectionMode::Lazy
+            //}
         }
     };
 

@@ -49,6 +49,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::sync::{Arc, mpsc};
+use rustc::util::nodemap::DefIdSet;
 
 mod code_stats;
 pub mod config;
@@ -67,6 +68,11 @@ pub struct OptimizationFuel {
 pub struct Session {
     /// A list of additional objects to link in for Yorick support.
     pub yk_link_objects: RefCell<Vec<YkExtraLinkObject>>,
+
+    /// A set of additional DefIds which were promoted to const during code-gen. We need to emit
+    /// SIR for these, but it is not possible to extract them from the optimised MIR (as we do for
+    /// other DefIds), so we have to stash them here as we encounter them during code-generation.
+    pub yk_promoted_def_ids: RefCell<DefIdSet>,
 
     pub target: config::Config,
     pub host: Target,
@@ -1222,6 +1228,7 @@ fn build_session_(
 
     let sess = Session {
         yk_link_objects: RefCell::new(Vec::new()),
+        yk_promoted_def_ids: RefCell::new(DefIdSet::default()),
         target: target_cfg,
         host,
         opts: sopts,

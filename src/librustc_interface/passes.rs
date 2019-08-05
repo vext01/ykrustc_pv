@@ -53,6 +53,7 @@ use syntax_ext;
 use rustc_yk_sections::emit_sir::{generate_sir, SirMode};
 use rustc_codegen_utils::link::out_filename;
 use rustc::util::nodemap::DefIdSet;
+use rustc::hir::def_id::{DefId, DefIndex};
 
 use serialize::json;
 use tempfile::Builder as TempFileBuilder;
@@ -1100,6 +1101,16 @@ pub fn start_codegen<'tcx>(
         }
     }
 
+    // XXX Just prints the problem location's def string manually.
+    // It is: "<yktrace::swt::SWTThreadTracer as yktrace::ThreadTracerImpl>::stop_tracing
+    for c in tcx.crates().iter() {
+        if tcx.crate_hash(*c).as_u64() == 4727478737927036944 {
+            let xd = DefId{krate: *c, index: DefIndex::from_u32(66)};
+            dbg!("XXXXXXXXXXXXXXXXXX");
+            dbg!(tcx.def_path_str(xd));
+        }
+    }
+
     // Output Yorick debug sections into binary targets.
     if tcx.sess.crate_types.borrow().contains(&config::CrateType::Executable) {
         let (def_ids, _) = tcx.collect_and_partition_mono_items(LOCAL_CRATE);
@@ -1114,7 +1125,7 @@ pub fn start_codegen<'tcx>(
             SirMode::Default(out_fname)
         };
 
-        match generate_sir(&tcx, &def_ids, sir_mode) {
+        match generate_sir(&tcx, &def_ids, &*tcx.sess.yk_promoted_def_ids.borrow(), sir_mode) {
             Ok(Some(obj)) => tcx.sess.yk_link_objects.borrow_mut().push(obj),
             Ok(None) => (),
             Err(e) => {
