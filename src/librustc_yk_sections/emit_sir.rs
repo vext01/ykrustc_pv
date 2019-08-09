@@ -13,7 +13,7 @@
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
-use rustc::ty::{TyCtxt, Const, TyKind, Ty, Instance}; //, ParamEnv};
+use rustc::ty::{TyCtxt, Const, TyKind, Ty, ParamEnv}; // , Instance}; //, ParamEnv};
 use syntax::ast::{UintTy, IntTy};
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
@@ -178,13 +178,36 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
                             //    true => Instance::resolve(*self.tcx, self.tcx.param_env(*target_def_id), *target_def_id, substs),
                             //    false => Some(Instance::mono(*target_def_id, substs)), //Some(self.tcx.symbol_name(inst).as_str().get().to_owned())),
                             //};
-                            let inst = Instance::resolve(*self.tcx, self.tcx.param_env(*target_def_id), *target_def_id, substs);
-                            if let Some(inst) = inst {
-                                self.callee_def_ids.insert(inst.def_id());
-                                ykpack::CallOperand::Fn(self.lower_def_id(&inst.def_id()), None) //Some(self.tcx.symbol_name(inst).as_str().get().to_owned()))
+                            //let inst = Instance::resolve(*self.tcx, self.tcx.param_env(*target_def_id), *target_def_id, substs);
+                            //if let Some(inst) = inst {
+                            //    self.callee_def_ids.insert(inst.def_id());
+                            //    ykpack::CallOperand::Fn(self.lower_def_id(&inst.def_id()), None) //Some(self.tcx.symbol_name(inst).as_str().get().to_owned()))
+                            dbg!(">>>");
+                            dbg!(self.tcx.def_path_str(*target_def_id));
+                            dbg!(substs);
+                            dbg!(const_ty);
+                            dbg!(self.tcx.param_env(*target_def_id));
+                            dbg!(ParamEnv::reveal_all());
+                            dbg!("<<<");
+
+                            //let const_ty = self.tcx.erase_regions(const_ty);
+                            let mono_ty = self.tcx.subst_and_normalize_erasing_regions(
+                                substs,
+                                //self.tcx.param_env(*target_def_id),
+                                ParamEnv::reveal_all(),
+                                const_ty,
+                            );
+
+                            if let TyKind::FnDef(ref mono_def_id, ..) = mono_ty.sty {
+                                self.callee_def_ids.insert(*mono_def_id);
+                                // XXX put back symbol name.
+                                ykpack::CallOperand::Fn(self.lower_def_id(&mono_def_id), None)
                             } else {
-                                ykpack::CallOperand::Fn(self.lower_def_id(&target_def_id), None)
+                                panic!("game over");
                             }
+                            //} else {
+                                //ykpack::CallOperand::Fn(self.lower_def_id(&target_def_id), None)
+                            //}
                         },
                         // A dynamic call target (e.g. via a trait object).
                         TyKind::Dynamic(ref binder, ..) => {
