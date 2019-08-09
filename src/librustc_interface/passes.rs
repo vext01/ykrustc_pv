@@ -1111,6 +1111,13 @@ pub fn start_codegen<'tcx>(
         }
     }
 
+    dbg!("--->");
+    for i in tcx.sess.yk_promoted_def_ids.borrow().iter() {
+        dbg!(tcx.crate_hash(i.krate), i.index);
+        dbg!(tcx.def_path_str(*i));
+    }
+    dbg!("<---");
+
     // Output Yorick debug sections into binary targets.
     if tcx.sess.crate_types.borrow().contains(&config::CrateType::Executable) {
         let (def_ids, _) = tcx.collect_and_partition_mono_items(LOCAL_CRATE);

@@ -13,7 +13,7 @@
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
-use rustc::ty::{TyCtxt, Const, TyKind, Ty, Instance};
+use rustc::ty::{TyCtxt, Const, TyKind, Ty, Instance}; //, ParamEnv};
 use syntax::ast::{UintTy, IntTy};
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
@@ -32,7 +32,7 @@ use std::error::Error;
 use std::mem::size_of;
 use rustc_data_structures::indexed_vec::IndexVec;
 use ykpack;
-use rustc::ty::fold::TypeFoldable;
+//use rustc::ty::fold::TypeFoldable;
 
 const SECTION_NAME: &'static str = ".yk_sir";
 const TMP_EXT: &'static str = ".yk_sir.tmp";
@@ -166,14 +166,25 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
                     match const_ty.sty {
                         // A statically known call target.
                         TyKind::FnDef(ref target_def_id, ref substs) => {
-                            let inst = Instance::new(*target_def_id, substs);
-                            let sym_name = match substs.needs_subst() {
-                                // If the instance isn't full instantiated, then it has no symbol name.
-                                true => None,
-                                false => Some(self.tcx.symbol_name(inst).as_str().get().to_owned()),
-                            };
-                            self.callee_def_ids.insert(*target_def_id);
-                            ykpack::CallOperand::Fn(self.lower_def_id(target_def_id), sym_name)
+
+                            //let inst = Instance::new(*target_def_id, substs);
+                            //let substituted = substs.subst(*self.tcx, substs);
+                            //self.tcx.normalize_erasing_regions(ty::ParamEnv::reveal_all(), substituted)
+
+                            dbg!("YYY", self.tcx.crate_hash(target_def_id.krate), self.tcx.def_path_str(*target_def_id), "/YYY");
+                            //let inst = Instance::new(*target_def_id, substs);
+                            //let inst = match substs.needs_subst() {
+                            //    // If the instance isn't full instantiated, then it has no symbol name.
+                            //    true => Instance::resolve(*self.tcx, self.tcx.param_env(*target_def_id), *target_def_id, substs),
+                            //    false => Some(Instance::mono(*target_def_id, substs)), //Some(self.tcx.symbol_name(inst).as_str().get().to_owned())),
+                            //};
+                            let inst = Instance::resolve(*self.tcx, self.tcx.param_env(*target_def_id), *target_def_id, substs);
+                            if let Some(inst) = inst {
+                                self.callee_def_ids.insert(inst.def_id());
+                                ykpack::CallOperand::Fn(self.lower_def_id(&inst.def_id()), None) //Some(self.tcx.symbol_name(inst).as_str().get().to_owned()))
+                            } else {
+                                ykpack::CallOperand::Fn(self.lower_def_id(&target_def_id), None)
+                            }
                         },
                         // A dynamic call target (e.g. via a trait object).
                         TyKind::Dynamic(ref binder, ..) => {
