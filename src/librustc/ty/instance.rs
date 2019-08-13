@@ -305,7 +305,7 @@ impl<'a, 'b, 'tcx> Instance<'tcx> {
         let fn_sig = tcx.fn_sig(def_id);
         let is_vtable_shim =
             fn_sig.inputs().skip_binder().len() > 0 && fn_sig.input(0).skip_binder().is_self();
-        if is_vtable_shim {
+        let inst = if is_vtable_shim {
             debug!(" => associated item with unsizeable self: Self");
             Some(Instance {
                 def: InstanceDef::VtableShim(def_id),
@@ -313,7 +313,12 @@ impl<'a, 'b, 'tcx> Instance<'tcx> {
             })
         } else {
             Instance::resolve(tcx, param_env, def_id, substs)
+        };
+        if let Some(i) = inst {
+            dbg!("VTABLER FINDS:", i, tcx.def_path_str(i.def_id()));
+            tcx.yk_poly_instances.borrow_mut().insert(i);
         }
+        inst
     }
 
     pub fn resolve_closure(

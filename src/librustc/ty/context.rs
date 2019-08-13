@@ -68,6 +68,8 @@ use std::iter;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::marker::PhantomData;
+use std::cell::RefCell;
+use crate::ty::Instance;
 use rustc_target::spec::abi;
 use rustc_macros::HashStable;
 use syntax::ast;
@@ -1117,6 +1119,8 @@ pub struct GlobalCtxt<'tcx> {
     pub tx_to_llvm_workers: Lock<mpsc::Sender<Box<dyn Any + Send>>>,
 
     output_filenames: Arc<OutputFilenames>,
+
+    pub yk_poly_instances: RefCell<FxHashSet<Instance<'tcx>>>,
 }
 
 impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
@@ -1335,6 +1339,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             alloc_map: Lock::new(interpret::AllocMap::new()),
             tx_to_llvm_workers: Lock::new(tx),
             output_filenames: Arc::new(output_filenames.clone()),
+            yk_poly_instances: RefCell::new(FxHashSet::default()),
         }
     }
 

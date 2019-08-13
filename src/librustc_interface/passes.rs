@@ -10,7 +10,7 @@ use rustc::hir::def_id::{CrateNum, LOCAL_CRATE};
 use rustc::lint;
 use rustc::middle::{self, reachable, resolve_lifetime, stability};
 use rustc::middle::privacy::AccessLevels;
-use rustc::ty::{self, AllArenas, Resolutions, TyCtxt, GlobalCtxt};
+use rustc::ty::{self, AllArenas, Resolutions, TyCtxt, GlobalCtxt, Instance};
 use rustc::ty::steal::Steal;
 use rustc::traits;
 use rustc::util::common::{time, ErrorReported};
@@ -27,6 +27,7 @@ use rustc_data_structures::{box_region_allow_access, declare_box_region_type, pa
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::stable_hasher::StableHasher;
 use rustc_data_structures::sync::{Lrc, ParallelIterator, par_iter};
+use rustc_data_structures::fx::FxHashSet;
 use rustc_incremental;
 use rustc_incremental::DepGraphFuture;
 use rustc_metadata::creader::CrateLoader;
@@ -1104,23 +1105,30 @@ pub fn start_codegen<'tcx>(
     // XXX Just prints the problem location's def string manually.
     // It is: "<yktrace::swt::SWTThreadTracer as yktrace::ThreadTracerImpl>::stop_tracing
     for c in tcx.crates().iter() {
-        if tcx.crate_hash(*c).as_u64() == 4727478737927036944 {
+        if tcx.crate_hash(*c).as_u64() == 16756429939732915145 {
             let xd = DefId{krate: *c, index: DefIndex::from_u32(66)};
-            dbg!("XXXXXXXXXXXXXXXXXX");
+            dbg!("PROBLEM LOC");
             dbg!(tcx.def_path_str(xd));
         }
     }
 
-    dbg!("--->");
-    for i in tcx.sess.yk_promoted_def_ids.borrow().iter() {
-        dbg!(tcx.crate_hash(i.krate), i.index);
-        dbg!(tcx.def_path_str(*i));
-    }
-    dbg!("<---");
+    //dbg!("--->");
+    //for i in tcx.sess.yk_promoted_def_ids.borrow().iter() {
+    //    dbg!(tcx.crate_hash(i.krate), i.index);
+    //    dbg!(tcx.def_path_str(*i));
+    //}
+    //dbg!("<---");
+
+    dbg!("POLY INSTANCES:");
+    dbg!(tcx.yk_poly_instances.borrow().len());
 
     // Output Yorick debug sections into binary targets.
     if tcx.sess.crate_types.borrow().contains(&config::CrateType::Executable) {
-        let (def_ids, _) = tcx.collect_and_partition_mono_items(LOCAL_CRATE);
+        let mono_def_ids = tcx.collect_and_partition_mono_items(LOCAL_CRATE).0;
+        //let insts: Vec<Instance<'tcx>> = mono_def_ids.iter().map(|d| Instance::mono(tcx, *d)).chain(tcx.yk_poly_instances.borrow_mut().drain()).collect();
+        let insts: FxHashSet<Instance<'tcx>> = mono_def_ids.iter().filter(|d| {
+            !tcx.generics_of(**d).requires_monomorphization(tcx)
+            }).map(|d| Instance::mono(tcx, *d)).chain(tcx.yk_poly_instances.borrow_mut().drain()).collect();
         let sir_mode = if tcx.sess.opts.output_types.contains_key(&OutputType::YkSir) {
             // The user passed "--emit yk-sir" so we will output textual SIR and stop.
             SirMode::TextDump(outputs.path(OutputType::YkSir))
@@ -1132,7 +1140,7 @@ pub fn start_codegen<'tcx>(
             SirMode::Default(out_fname)
         };
 
-        match generate_sir(&tcx, &def_ids, &*tcx.sess.yk_promoted_def_ids.borrow(), sir_mode) {
+        match generate_sir(&tcx, &insts, sir_mode) {
             Ok(Some(obj)) => tcx.sess.yk_link_objects.borrow_mut().push(obj),
             Ok(None) => (),
             Err(e) => {

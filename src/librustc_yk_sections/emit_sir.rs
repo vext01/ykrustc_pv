@@ -13,7 +13,7 @@
 //!
 //! Serialisation itself is performed by an external library: ykpack.
 
-use rustc::ty::{TyCtxt, Const, TyKind, Ty, ParamEnv}; // , Instance}; //, ParamEnv};
+use rustc::ty::{TyCtxt, Const, TyKind, Ty, ParamEnv, Instance}; //, ParamEnv};
 use syntax::ast::{UintTy, IntTy};
 use rustc::hir::def_id::DefId;
 use rustc::mir::{
@@ -32,7 +32,7 @@ use std::error::Error;
 use std::mem::size_of;
 use rustc_data_structures::indexed_vec::IndexVec;
 use ykpack;
-//use rustc::ty::fold::TypeFoldable;
+use rustc_data_structures::fx::FxHashSet;
 
 const SECTION_NAME: &'static str = ".yk_sir";
 const TMP_EXT: &'static str = ".yk_sir.tmp";
@@ -47,7 +47,7 @@ pub enum SirMode {
 }
 
 /// A conversion context holds the state needed to perform the SIR lowering.
-struct ConvCx<'a, 'tcx, 'gcx> {
+struct ConvCx<'i, 'a, 'tcx, 'gcx> {
     /// The compiler's god struct. Needed for queries etc.
     tcx: &'a TyCtxt<'a, 'tcx, 'gcx>,
     /// Monotonically increasing number used to give SIR variables a unique ID.
@@ -57,20 +57,20 @@ struct ConvCx<'a, 'tcx, 'gcx> {
     /// The MIR we are lowering.
     mir: &'a Body<'tcx>,
     /// The DefId of the above MIR.
-    def_id: DefId,
+    instance: &'i Instance<'tcx>,
     /// We keep track of the DefIds that each Body calls so that we can process them later.
-    callee_def_ids: DefIdSet,
+    callee_instances: FxHashSet<Instance<'tcx>>,
 }
 
-impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
-    fn new(tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId, mir: &'a Body<'tcx>) -> Self {
+impl<'i, 'a, 'tcx, 'gcx> ConvCx<'i, 'a, 'tcx, 'tcx> {
+    fn new(tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, instance: &'i Instance<'tcx>, mir: &'a Body<'tcx>) -> Self {
         Self {
             tcx,
             next_sir_var: 0,
             var_map: IndexVec::new(),
             mir,
-            def_id,
-            callee_def_ids: DefIdSet::default(),
+            instance,
+            callee_instances: FxHashSet::default(),
         }
     }
 
@@ -103,11 +103,11 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
     }
 
     /// Entry point for the lowering process.
-    fn lower(mut self) -> (ykpack::Body, DefIdSet) {
-        let dps = self.tcx.def_path_str(self.def_id);
-        let body = ykpack::Body::new(self.lower_def_id(&self.def_id.to_owned()),
+    fn lower(mut self) -> (ykpack::Body, FxHashSet<Instance<'tcx>>) {
+        let dps = self.tcx.def_path_str(self.instance.def_id());
+        let body = ykpack::Body::new(self.lower_def_id(&self.instance.def_id().to_owned()),
             dps, self.mir.basic_blocks().iter().map(|b| self.lower_block(b)).collect());
-        (body, self.callee_def_ids)
+        (body, self.callee_instances)
     }
 
     fn lower_def_id(&mut self, def_id: &DefId) -> ykpack::DefId {
@@ -163,43 +163,25 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
                 }),
             TerminatorKind::Call{ref func, ref destination, .. } => {
                 let ser_oper = if let Operand::Constant(box Constant { literal: Const { ty: const_ty, .. }, ..}) = func {
-                    match const_ty.sty {
+                    //match const_ty.sty {
                         // A statically known call target.
-                        TyKind::FnDef(ref target_def_id, ref substs) => {
-
-                            //let inst = Instance::new(*target_def_id, substs);
-                            //let substituted = substs.subst(*self.tcx, substs);
-                            //self.tcx.normalize_erasing_regions(ty::ParamEnv::reveal_all(), substituted)
-
-                            dbg!("YYY", self.tcx.crate_hash(target_def_id.krate), self.tcx.def_path_str(*target_def_id), "/YYY");
-                            //let inst = Instance::new(*target_def_id, substs);
-                            //let inst = match substs.needs_subst() {
-                            //    // If the instance isn't full instantiated, then it has no symbol name.
-                            //    true => Instance::resolve(*self.tcx, self.tcx.param_env(*target_def_id), *target_def_id, substs),
-                            //    false => Some(Instance::mono(*target_def_id, substs)), //Some(self.tcx.symbol_name(inst).as_str().get().to_owned())),
-                            //};
-                            //let inst = Instance::resolve(*self.tcx, self.tcx.param_env(*target_def_id), *target_def_id, substs);
-                            //if let Some(inst) = inst {
-                            //    self.callee_def_ids.insert(inst.def_id());
-                            //    ykpack::CallOperand::Fn(self.lower_def_id(&inst.def_id()), None) //Some(self.tcx.symbol_name(inst).as_str().get().to_owned()))
-                            dbg!(">>>");
-                            dbg!(self.tcx.def_path_str(*target_def_id));
-                            dbg!(substs);
-                            dbg!(const_ty);
-                            dbg!(self.tcx.param_env(*target_def_id));
-                            dbg!(ParamEnv::reveal_all());
-                            dbg!("<<<");
-
-                            //let const_ty = self.tcx.erase_regions(const_ty);
+                        //TyKind::FnDef(ref _target_def_id, ref _substs, ..) => {
+                            //self.callee_instances.insert(Instance::new(*target_def_id, substs));
                             let mono_ty = self.tcx.subst_and_normalize_erasing_regions(
-                                substs,
-                                //self.tcx.param_env(*target_def_id),
-                                ParamEnv::reveal_all(),
-                                const_ty,
+                                  self.instance.substs,
+                                  ParamEnv::reveal_all(), // param_env only used in type checking (already done).
+                                  const_ty,
                             );
 
-                            if let TyKind::FnDef(ref mono_def_id, ..) = mono_ty.sty {
-                                self.callee_def_ids.insert(*mono_def_id);
+                            if let TyKind::FnDef(ref mono_def_id, ref mono_substs) = mono_ty.sty {
+                                //self.callee_instances.insert(Instance::new(*mono_def_id, self.instance.substs));
+                                //self.callee_instances.insert(Instance::new(*target_def_id, substs));
+                                //if !self.tcx.generics_of(*mono_def_id).requires_monomorphization(*self.tcx) {
+                                //    self.callee_instances.insert(Instance::mono(*self.tcx, *mono_def_id));
+                                //}
+                                let mono_inst = Instance::new(*mono_def_id, mono_substs);
+                                dbg!("WALKER FINDS:", mono_inst, self.tcx.def_path_str(mono_inst.def_id()));
+                                self.callee_instances.insert(Instance::new(*mono_def_id, mono_substs));
                                 // XXX put back symbol name.
                                 ykpack::CallOperand::Fn(self.lower_def_id(&mono_def_id), None)
                             } else {
@@ -208,24 +190,24 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
                             //} else {
                                 //ykpack::CallOperand::Fn(self.lower_def_id(&target_def_id), None)
                             //}
-                        },
+                        //},
                         // A dynamic call target (e.g. via a trait object).
-                        TyKind::Dynamic(ref binder, ..) => {
-                            dbg!(binder);
-                            if let Some(trait_ref) = binder.principal() {
-                                let methods_root = self.tcx.vtable_methods(trait_ref.with_self_ty(*self.tcx, const_ty));
-                                dbg!(methods_root);
-                                for meth in methods_root {
-                                    if let Some((def_id, _)) = meth {
-                                        dbg!(self.tcx.def_path_str(*def_id));
-                                        self.callee_def_ids.insert(*def_id);
-                                    }
-                                }
-                            }
-                            ykpack::CallOperand::Unknown // FIXME -- decide how to serialise.
-                        },
-                        _ => ykpack::CallOperand::Unknown,
-                    }
+                        //TyKind::Dynamic(ref binder, ..) => {
+                        //    dbg!(binder);
+                        //    if let Some(trait_ref) = binder.principal() {
+                        //        let methods_root = self.tcx.vtable_methods(trait_ref.with_self_ty(*self.tcx, const_ty));
+                        //        dbg!(methods_root);
+                        //        for meth in methods_root {
+                        //            if let Some((def_id, _)) = meth {
+                        //                dbg!(self.tcx.def_path_str(*def_id));
+                        //                self.callee_def_ids.insert(*def_id);
+                        //            }
+                        //        }
+                        //    }
+                        //    ykpack::CallOperand::Unknown // FIXME -- decide how to serialise.
+                        //},
+                        //_ => ykpack::CallOperand::Unknown,
+                   //}
                 } else {
                     // FIXME -- implement other callables.
                     ykpack::CallOperand::Unknown
@@ -302,10 +284,10 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
                 Ok(ykpack::Rvalue::BinaryOp(self.lower_binary_op(*bin_op), self.lower_operand(o1)?,
                     self.lower_operand(o2)?)),
             Rvalue::NullaryOp(NullOp::Box, _) => {
-                let def_id = self.tcx.lang_items()
+                let _def_id = self.tcx.lang_items()
                     .require(ExchangeMallocFnLangItem)
                     .expect("can't find DefId for ExchangeMallocFnLangItem");
-                self.callee_def_ids.insert(def_id);
+                //self.callee_def_ids.insert(def_id);
                 Err(()) // FIXME: decide how to lower boxes.
             },
             _ => Err(()),
@@ -401,12 +383,12 @@ impl<'a, 'tcx, 'gcx> ConvCx<'a, 'tcx, 'tcx> {
     }
 }
 
-/// Writes SIR to file for the specified DefIds, possibly returning a linkable ELF object.
+/// Writes SIR to file for the specified instances, possibly returning a linkable ELF object.
 pub fn generate_sir<'a, 'tcx>(
-    tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, def_ids: &DefIdSet, promoted_def_ids: &DefIdSet, mode: SirMode)
+    tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, instances: &FxHashSet<Instance<'tcx>>, mode: SirMode)
     -> Result<Option<YkExtraLinkObject>, Box<dyn Error>>
 {
-    let sir_path = do_generate_sir(tcx, def_ids, promoted_def_ids, &mode)?;
+    let sir_path = do_generate_sir(tcx, instances, &mode)?;
     match mode {
         SirMode::Default(_) => {
             // In this case the file at `sir_path` is a raw binary file which we use to make an
@@ -426,7 +408,7 @@ pub fn generate_sir<'a, 'tcx>(
 }
 
 fn do_generate_sir<'a, 'tcx>(
-    tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, def_ids: &DefIdSet, promoted_def_ids: &DefIdSet, mode: &SirMode)
+    tcx: &'a TyCtxt<'a, 'tcx, 'tcx>, instances: &FxHashSet<Instance<'tcx>>, mode: &SirMode)
     -> Result<PathBuf, Box<dyn Error>>
 {
     let (sir_path, mut default_file, textdump_file) = match mode {
@@ -455,37 +437,45 @@ fn do_generate_sir<'a, 'tcx>(
     // targets) which in turn will need to be processed. However, to satisfy the reproducible build
     // tests, we must process the DefIds in a deterministic order. To that end all newly discovered
     // work must be sorted before it is appended into the work list.
-    let mut work: Vec<DefId> = def_ids.iter().chain(promoted_def_ids.iter()).cloned().collect();
-    work.sort();
-    let mut seen =  DefIdSet::default();
+    // FIXME cloned kill
+    let mut work: Vec<Instance<'tcx>> = instances.iter().cloned().collect(); //.chain(s.iter()).cloned().collect();
+    //work.sort(); // FIXME HRM
+    let mut seen = DefIdSet::default(); //FxHashSet::default();
+    let mut seen_instances = FxHashSet::default();
     while !work.is_empty() {
-        let def_id = work.pop().unwrap();
-        if seen.contains(&def_id) {
+        let inst = work.pop().unwrap();
+        if seen_instances.contains(&inst) {
             continue;
         }
 
+        let def_id = inst.def_id();
         if tcx.is_mir_available(def_id) {
             let mir = tcx.optimized_mir(def_id);
-            let ccx = ConvCx::new(tcx, def_id, mir);
+            let ccx = ConvCx::new(tcx, &inst, mir);
             let (pack, mut extra_work) = ccx.lower();
 
             if let Some(ref mut e) = enc {
-                e.serialise(ykpack::Pack::Body(pack))?;
+                if !seen.contains(&def_id) {
+                    e.serialise(ykpack::Pack::Body(pack))?;
+                }
             } else {
                 write!(textdump_file.as_ref().unwrap(), "{}", pack)?;
             }
 
-            let mut extra_work: Vec<DefId> = extra_work.drain().collect();
-            extra_work.sort();
+            let extra_work: Vec<Instance<'tcx>> = extra_work.drain().collect();
+            //extra_work.sort();
             work.extend(extra_work);
         }
 
         if let Some(ref mut e) = enc {
+            if !seen.contains(&def_id) {
             e.serialise(ykpack::Pack::Debug(ykpack::SirDebug::new(
-                lower_def_id(tcx, &def_id), tcx.def_path_str(def_id))))?;
+                lower_def_id(tcx, &def_id), tcx.def_path_str(def_id), tcx.is_mir_available(def_id))))?;
+            }
         }
 
         seen.insert(def_id);
+        seen_instances.insert(inst);
     }
 
     if let Some(e) = enc {

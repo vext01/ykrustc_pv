@@ -56,7 +56,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> InterpretCx<'a, 'mir, 'tcx, M> 
         let tcx = &*self.tcx;
 
         let drop = Instance::resolve_drop_in_place(*tcx, ty);
-        self.tcx.sess.yk_promoted_def_ids.borrow_mut().insert(drop.def_id().clone());
+        self.tcx.yk_poly_instances.borrow_mut().insert(drop);
         let drop = self.memory.create_fn_alloc(drop);
 
         // no need to do any alignment checks on the memory accesses below, because we know the
@@ -77,7 +77,6 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> InterpretCx<'a, 'mir, 'tcx, M> 
 
         for (i, method) in methods.iter().enumerate() {
             if let Some((def_id, substs)) = *method {
-                self.tcx.sess.yk_promoted_def_ids.borrow_mut().insert(def_id.clone());
                 // resolve for vtable: insert shims where needed
                 let substs = self.subst_and_normalize_erasing_regions(substs)?;
                 let instance = ty::Instance::resolve_for_vtable(
@@ -92,7 +91,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'a, 'mir, 'tcx>> InterpretCx<'a, 'mir, 'tcx, M> 
                     .get_mut(method_ptr.alloc_id)?
                     .write_ptr_sized(tcx, method_ptr, Scalar::Ptr(fn_ptr).into())?;
 
-                self.tcx.sess.yk_promoted_def_ids.borrow_mut().insert(instance.def_id().clone());
+                self.tcx.yk_poly_instances.borrow_mut().insert(instance);
             }
         }
 

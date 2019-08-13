@@ -37,6 +37,7 @@ use syntax_pos::{MultiSpan, Span};
 use crate::util::profiling::SelfProfiler;
 
 use rustc_target::spec::{PanicStrategy, RelroLevel, Target, TargetTriple};
+//use rustc::ty::Instance;
 use rustc_data_structures::flock;
 use rustc_data_structures::jobserver;
 use ::jobserver::Client;
@@ -49,7 +50,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::sync::{Arc, mpsc};
-use rustc::util::nodemap::DefIdSet;
 
 mod code_stats;
 pub mod config;
@@ -69,10 +69,10 @@ pub struct Session {
     /// A list of additional objects to link in for Yorick support.
     pub yk_link_objects: RefCell<Vec<YkExtraLinkObject>>,
 
-    /// A set of additional DefIds which were promoted to const during code-gen. We need to emit
+    /// XXX A set of additional DefIds which were promoted to const during code-gen. We need to emit
     /// SIR for these, but it is not possible to extract them from the optimised MIR (as we do for
     /// other DefIds), so we have to stash them here as we encounter them during code-generation.
-    pub yk_promoted_def_ids: RefCell<DefIdSet>,
+    //pub yk_poly_instances: RefCell<FxHashSet<Instance<'_>>>,
 
     pub target: config::Config,
     pub host: Target,
@@ -1228,7 +1228,7 @@ fn build_session_(
 
     let sess = Session {
         yk_link_objects: RefCell::new(Vec::new()),
-        yk_promoted_def_ids: RefCell::new(DefIdSet::default()),
+        //yk_poly_instances: RefCell::new(FxHashSet::default()),
         target: target_cfg,
         host,
         opts: sopts,
