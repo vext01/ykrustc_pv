@@ -315,7 +315,7 @@ impl<'a, 'b, 'tcx> Instance<'tcx> {
             Instance::resolve(tcx, param_env, def_id, substs)
         };
         if let Some(i) = inst {
-            dbg!("VTABLER FINDS:", i, tcx.def_path_str(i.def_id()));
+            dbg!("VTABLER FINDS:", i, tcx.def_path_str(i.def_id()), tcx.crate_hash(i.def_id().krate));
             tcx.yk_poly_instances.borrow_mut().insert(i);
         }
         inst

@@ -163,10 +163,9 @@ impl<'i, 'a, 'tcx, 'gcx> ConvCx<'i, 'a, 'tcx, 'tcx> {
                 }),
             TerminatorKind::Call{ref func, ref destination, .. } => {
                 let ser_oper = if let Operand::Constant(box Constant { literal: Const { ty: const_ty, .. }, ..}) = func {
-                    //match const_ty.sty {
+                    match const_ty.sty {
                         // A statically known call target.
-                        //TyKind::FnDef(ref _target_def_id, ref _substs, ..) => {
-                            //self.callee_instances.insert(Instance::new(*target_def_id, substs));
+                        TyKind::FnDef(ref _target_def_id, ref _substs, ..) => {
                             let mono_ty = self.tcx.subst_and_normalize_erasing_regions(
                                   self.instance.substs,
                                   ParamEnv::reveal_all(), // param_env only used in type checking (already done).
@@ -174,11 +173,6 @@ impl<'i, 'a, 'tcx, 'gcx> ConvCx<'i, 'a, 'tcx, 'tcx> {
                             );
 
                             if let TyKind::FnDef(ref mono_def_id, ref mono_substs) = mono_ty.sty {
-                                //self.callee_instances.insert(Instance::new(*mono_def_id, self.instance.substs));
-                                //self.callee_instances.insert(Instance::new(*target_def_id, substs));
-                                //if !self.tcx.generics_of(*mono_def_id).requires_monomorphization(*self.tcx) {
-                                //    self.callee_instances.insert(Instance::mono(*self.tcx, *mono_def_id));
-                                //}
                                 let mono_inst = Instance::new(*mono_def_id, mono_substs);
                                 dbg!("WALKER FINDS:", mono_inst, self.tcx.def_path_str(mono_inst.def_id()));
                                 self.callee_instances.insert(Instance::new(*mono_def_id, mono_substs));
@@ -187,27 +181,24 @@ impl<'i, 'a, 'tcx, 'gcx> ConvCx<'i, 'a, 'tcx, 'tcx> {
                             } else {
                                 panic!("game over");
                             }
-                            //} else {
-                                //ykpack::CallOperand::Fn(self.lower_def_id(&target_def_id), None)
-                            //}
-                        //},
+                        },
                         // A dynamic call target (e.g. via a trait object).
-                        //TyKind::Dynamic(ref binder, ..) => {
-                        //    dbg!(binder);
-                        //    if let Some(trait_ref) = binder.principal() {
-                        //        let methods_root = self.tcx.vtable_methods(trait_ref.with_self_ty(*self.tcx, const_ty));
-                        //        dbg!(methods_root);
-                        //        for meth in methods_root {
-                        //            if let Some((def_id, _)) = meth {
-                        //                dbg!(self.tcx.def_path_str(*def_id));
-                        //                self.callee_def_ids.insert(*def_id);
-                        //            }
-                        //        }
-                        //    }
-                        //    ykpack::CallOperand::Unknown // FIXME -- decide how to serialise.
-                        //},
-                        //_ => ykpack::CallOperand::Unknown,
-                   //}
+                        TyKind::Dynamic(ref binder, ..) => {
+                            dbg!(binder);
+                            if let Some(pcpl) = binder.principal() {
+                                let pcpl_def_id = pcpl.def_id();
+                                let _trait_def = self.tcx.trait_def(pcpl_def_id);
+
+                                //let mono_ty = self.tcx.subst_and_normalize_erasing_regions(
+                                //      self.instance.substs,
+                                //      ParamEnv::reveal_all(), // param_env only used in type checking (already done).
+                                //      const_ty,
+                                //);
+                            }
+                            ykpack::CallOperand::Unknown // FIXME -- decide how to serialise.
+                        },
+                        _ => ykpack::CallOperand::Unknown,
+                   }
                 } else {
                     // FIXME -- implement other callables.
                     ykpack::CallOperand::Unknown
