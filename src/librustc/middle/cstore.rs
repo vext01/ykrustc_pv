@@ -215,6 +215,7 @@ pub trait CrateStore {
                                  tcx: TyCtxt<'a, 'tcx, 'tcx>)
                                  -> EncodedMetadata;
     fn metadata_encoding_version(&self) -> &[u8];
+    fn all_metadata_defids(&self) -> Vec<DefId>;
 }
 
 pub type CrateStoreDyn = dyn CrateStore + sync::Sync;

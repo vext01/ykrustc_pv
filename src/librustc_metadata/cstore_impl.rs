@@ -15,7 +15,7 @@ use rustc::hir;
 use rustc::session::{CrateDisambiguator, Session};
 use rustc::ty::{self, TyCtxt};
 use rustc::ty::query::Providers;
-use rustc::hir::def_id::{CrateNum, DefId, LOCAL_CRATE, CRATE_DEF_INDEX};
+use rustc::hir::def_id::{CrateNum, DefId, LOCAL_CRATE, CRATE_DEF_INDEX, DefIndex};
 use rustc::hir::map::{DefKey, DefPath, DefPathHash};
 use rustc::hir::map::definitions::DefPathTable;
 use rustc::util::nodemap::DefIdMap;
@@ -560,5 +560,17 @@ impl CrateStore for cstore::CStore {
     fn metadata_encoding_version(&self) -> &[u8]
     {
         schema::METADATA_HEADER
+    }
+
+    // Returns a vector of the DefIds contained within all (loaded) meta-data.
+    fn all_metadata_defids(&self) -> Vec<DefId> {
+        let mut res = Vec::new();
+        self.iter_crate_data(|cnum, md| {
+            let def_idxs = 0..md.def_path_table.size();
+            res.extend::<Vec<DefId>>(def_idxs.map(|idx|
+                    DefId { krate: cnum, index: DefIndex::from_usize(idx) }).collect());
+        });
+
+        res
     }
 }

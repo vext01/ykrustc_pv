@@ -1462,6 +1462,10 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
         self.cstore.metadata_encoding_version().to_vec()
     }
 
+    pub fn all_metadata_defids(&self) -> Vec<DefId> {
+        self.cstore.all_metadata_defids()
+    }
+
     // Note that this is *untracked* and should only be used within the query
     // system if the result is otherwise tracked through queries
     pub fn crate_data_as_rc_any(self, cnum: CrateNum) -> Lrc<dyn Any> {
