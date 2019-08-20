@@ -64,7 +64,7 @@ use std::hash::{Hash, Hasher};
 use std::fmt;
 use std::mem;
 use std::ops::{Deref, Bound};
-use std::iter;
+use std::iter::{self, FromIterator};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::marker::PhantomData;
@@ -1462,8 +1462,8 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
         self.cstore.metadata_encoding_version().to_vec()
     }
 
-    pub fn all_metadata_defids(&self) -> Vec<DefId> {
-        self.cstore.all_metadata_defids()
+    pub fn all_metadata_defids(&self) -> DefIdSet {
+        DefIdSet::from_iter(self.cstore.all_metadata_defids())
     }
 
     // Note that this is *untracked* and should only be used within the query

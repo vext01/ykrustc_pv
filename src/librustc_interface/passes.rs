@@ -64,7 +64,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::iter;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::mem;
@@ -1102,8 +1102,8 @@ pub fn start_codegen<'tcx>(
 
     // Output Yorick debug sections into binary targets.
     if tcx.sess.crate_types.borrow().contains(&config::CrateType::Executable) {
-        let mut def_ids = tcx.mir_keys(LOCAL_CRATE).to_owned();
-        def_ids.extend(tcx.all_metadata_defids());
+        let mut def_ids = tcx.all_metadata_defids();
+        def_ids.extend(tcx.collect_and_partition_mono_items(LOCAL_CRATE).0.iter());
 
         let sir_mode = if tcx.sess.opts.output_types.contains_key(&OutputType::YkSir) {
             // The user passed "--emit yk-sir" so we will output textual SIR and stop.
