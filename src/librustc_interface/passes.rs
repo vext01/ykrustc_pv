@@ -1116,7 +1116,7 @@ pub fn start_codegen<'tcx>(
             SirMode::Default(out_fname)
         };
 
-        match generate_sir(&tcx, &def_ids, sir_mode) {
+        match generate_sir(&tcx, def_ids, sir_mode) {
             Ok(Some(obj)) => tcx.sess.yk_link_objects.borrow_mut().push(obj),
             Ok(None) => (),
             Err(e) => {
